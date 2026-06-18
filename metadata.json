@@ -1,0 +1,6 @@
+{
+  "name": "Instituto Linkon Pesquisas",
+  "description": "Plataforma oficial de opinião pública e pesquisas eleitorais do Instituto Linkon. Questionário interativo para entrevistados e painel analítico em tempo real.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
