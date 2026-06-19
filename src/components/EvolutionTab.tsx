@@ -210,7 +210,7 @@ Intervalo das coletas: Ciclo Corrente (Amostragem ativa)
     text += `
 --------------------------------------------
 *👉 Diagnóstico Integrado Linkon Inteligência*
-*Site:* grupolinkon.com
+*Site:* grupolinkon.online
 Dados consolidados quinzenalmente.
 `;
 
@@ -237,7 +237,7 @@ Dados consolidados quinzenalmente.
       text += `  • Flutuação Líquida: *${diffText}*\n\n`;
     });
 
-    text += `============================================\n*👉 Relatório Técnico Linkon Inteligência*\n*Site:* grupolinkon.com\nGerado em: ${new Date().toLocaleDateString("pt-BR")} | Código: EXCLUSIVO-PAINEL\n`;
+    text += `============================================\n*👉 Relatório Técnico Linkon Inteligência*\n*Site:* grupolinkon.online\nGerado em: ${new Date().toLocaleDateString("pt-BR")} | Código: EXCLUSIVO-PAINEL\n`;
 
     navigator.clipboard.writeText(text).then(() => {
       setCopiedDossier(true);

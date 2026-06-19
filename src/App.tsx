@@ -781,7 +781,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
 --------------------------------------------
 *👉 Plataforma Administrativa Linkon - Sondagem Eleitoral*
-*Website Oficial:* grupolinkon.com
+*Website Oficial:* grupolinkon.online
 `;
   };
 
@@ -2773,7 +2773,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                       <div>
                         <h3 className="text-sm font-bold font-display uppercase text-white tracking-wider">Boletim Otimizado para WhatsApp</h3>
                         <p className="text-xs text-gray-400 mt-1">
-                          Compacto, com negritos formatados com asteriscos simples (*texto*) e link <b>grupolinkon.com</b> integrado. Pronto para colar de forma legível em grupos e conversas!
+                          Compacto, com negritos formatados com asteriscos simples (*texto*) e link <b>grupolinkon.online</b> integrado. Pronto para colar de forma legível em grupos e conversas!
                         </p>
                       </div>
 

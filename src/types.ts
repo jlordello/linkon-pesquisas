@@ -365,7 +365,7 @@ export function generateMarkdownReport(data: PollData): string {
 *📅 PERÍODO DE RECOLHIMENTO DA ENTREVISTA:* de ${getCurrentCycleDates().start} a ${getCurrentCycleDates().end}
 *🚀 PRÓXIMA AMOSTRAGEM INICIA EM:* ${getNextCycleStartDate()}
 
-*👉 Site Oficial:* grupolinkon.com
+*👉 Site Oficial:* grupolinkon.online
 
 --------------------------------------------
 
@@ -423,7 +423,7 @@ ${fedLines}
 • *Período de Campo:* ${data.metadata.fieldPeriod}
 • *Observação:* Levantamento de opinião pública voluntária amadora.
 
-*🔗 Divulgação Oficial:* https://grupolinkon.com
+*🔗 Divulgação Oficial:* https://grupolinkon.online
 `;
 }
 
