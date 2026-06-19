@@ -28,7 +28,7 @@ interface EvolutionTabProps {
   responses?: SurveyResponse[];
 }
 
-type OfficeType = "president" | "governor" | "stateDeputy" | "federalDeputy";
+type OfficeType = "president" | "governor" | "stateDeputy" | "federalDeputy" | "mayor";
 
 interface HistoricalDataPoint {
   cycle: string;
@@ -96,12 +96,24 @@ const CANDIDATE_OFFICES = {
       { id: "fed-leandro", name: "Leandro Azevedo", party: "Republicanos", color: "#6b7280" }
     ],
     fieldKey: "voteFederalDeputy"
+  },
+  mayor: {
+    title: "Prefeito de Petrópolis",
+    candidates: [
+      { id: "may-hingo", name: "Hingo Hammes", party: "PP", color: "#60a5fa" },
+      { id: "may-yuri", name: "Yuri Moura", party: "PSOL", color: "#f59e0b" },
+      { id: "may-paulo", name: "Paulo Mustrangi", party: "PT", color: "#ef4444" },
+      { id: "may-rubens", name: "Rubens Bomtempo", party: "PT", color: "#10b981" },
+      { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos", color: "#8b5cf6" }
+    ],
+    fieldKey: "voteMayorPetropolis"
   }
 };
 
 export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses = [] }) => {
   const [selectedOffice, setSelectedOffice] = useState<OfficeType>("stateDeputy");
   const [copied, setCopied] = useState(false);
+  const [copiedDossier, setCopiedDossier] = useState(false);
 
   // Calculate dynamic multi-cycle evolution data based on actual responses list!
   const computedEvolutionData = React.useMemo(() => {
@@ -140,58 +152,25 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
         return { ...cand, currentPct };
       });
 
-      // Display the most active candidate profiles for visual legibility (max 5)
-      let displayedCandidates = scoredCandidates.filter((c) => c.currentPct > 0);
-      
-      // Fallback filler: if we don't have enough voted candidate lines, pad up to 4 lines using default lists
-      if (displayedCandidates.length < 4) {
-        const selectedIds = new Set(displayedCandidates.map((c) => c.id));
-        for (const cand of scoredCandidates) {
-          if (!selectedIds.has(cand.id) && displayedCandidates.length < 4) {
-            displayedCandidates.push(cand);
-            selectedIds.add(cand.id);
-          }
-        }
-      } else if (displayedCandidates.length > 5) {
-        // Sort descending by highest votes and take top 5
-        displayedCandidates.sort((a, b) => b.currentPct - a.currentPct);
-        displayedCandidates = displayedCandidates.slice(0, 5);
-      }
+      // Display all candidate profiles in the evolution chart as requested
+      let displayedCandidates = [...scoredCandidates];
 
       // Order alphabetically to retain stable line legends
       displayedCandidates.sort((a, b) => a.name.localeCompare(b.name));
 
-      // Construct historical datapoints
-      const cycle1: HistoricalDataPoint = { cycle: "Ciclo 1", dateRange: "01/05 - 15/05" };
-      const cycle2: HistoricalDataPoint = { cycle: "Ciclo 2", dateRange: "16/05 - 30/05" };
-      const cycle3: HistoricalDataPoint = { cycle: "Ciclo 3", dateRange: "01/06 - 15/06" };
-      const cycle4: HistoricalDataPoint = { cycle: "Ciclo 4 (Atual)", dateRange: `${currentDates.start} a ${currentDates.end}` };
+      // Construct historical datapoints - Only 1 cycle since the platform was just launched
+      const cycle1: HistoricalDataPoint = { cycle: `Ciclo 1 (Atual: ${currentDates.start} a ${currentDates.end})`, dateRange: `${currentDates.start} a ${currentDates.end}` };
 
       displayedCandidates.forEach((cand) => {
         const valCurrent = cand.currentPct;
         const hash = cand.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
         if (total > 0) {
-          // Coherent, realistic retro-evolution curves leading smoothly to the current interviewee data
-          const factor1 = 0.81 + ((hash % 11) / 100);
-          const factor2 = 0.88 + (((hash + 2) % 9) / 100);
-          const factor3 = 0.94 + (((hash + 5) % 6) / 100);
-
-          cycle1[cand.name] = parseFloat((valCurrent * factor1).toFixed(1));
-          cycle2[cand.name] = parseFloat((valCurrent * factor2).toFixed(1));
-          cycle3[cand.name] = parseFloat((valCurrent * factor3).toFixed(1));
-          cycle4[cand.name] = valCurrent;
+          cycle1[cand.name] = valCurrent;
         } else {
           // Perfect simulated baseline for cold loads of empty database
           const baselinePct = 12 + (hash % 19);
-          const factor1 = 0.82 + (hash % 6) / 100;
-          const factor2 = 0.89 + ((hash + 3) % 7) / 100;
-          const factor3 = 0.95 + ((hash + 6) % 4) / 100;
-
-          cycle1[cand.name] = parseFloat((baselinePct * factor1).toFixed(1));
-          cycle2[cand.name] = parseFloat((baselinePct * factor2).toFixed(1));
-          cycle3[cand.name] = parseFloat((baselinePct * factor3).toFixed(1));
-          cycle4[cand.name] = parseFloat(baselinePct.toFixed(1));
+          cycle1[cand.name] = parseFloat(baselinePct.toFixed(1));
         }
       });
 
@@ -203,7 +182,7 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
           color: c.color,
           id: c.id
         })),
-        data: [cycle1, cycle2, cycle3, cycle4]
+        data: [cycle1]
       };
     });
 
@@ -214,24 +193,18 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
 
   const handleCopyHistory = () => {
     let text = `*📈 HISTÓRICO DE EVOLUÇÃO PARA COMPARTILHAMENTO*
-*Instituto Linkon Pesquisas*
+*Instituto Linkon - Sondagem Eleitoral*
 Foco Regional: Petrópolis, RJ
 
 *Cenário Selecionado:* *${scenario.title}*
-Intervalo das coletas: Quinze dias (Amostragem rotativa)
+Intervalo das coletas: Ciclo Corrente (Amostragem ativa)
 
 --------------------------------------------
 `;
 
     scenario.candidates.forEach((cand) => {
-      const vals = scenario.data.map(d => `${d[cand.name]}%`);
-      const val1 = scenario.data[0][cand.name] as number;
       const valLatest = scenario.data[scenario.data.length - 1][cand.name] as number;
-      const diff = parseFloat((valLatest - val1).toFixed(1));
-      const trendSymbol = diff >= 0 ? "🔺" : "🔻";
-      const trendText = diff >= 0 ? `+${diff}%` : `${diff}%`;
-
-      text += `• *${cand.name}* (${cand.party}): ${vals.join(" ➡️ ")} (${trendSymbol} ${trendText})\n`;
+      text += `• *${cand.name}* (${cand.party}): *${valLatest.toFixed(1)}%*\n`;
     });
 
     text += `
@@ -247,6 +220,31 @@ Dados consolidados quinzenalmente.
     });
   };
 
+  const handleCopyDossier = () => {
+    let text = `*📊 DOSSIÊ NUMÉRICO REAL DETALHADO (EXCLUSIVO PAINEL)*\n*Instituto Linkon - Sondagem Eleitoral*\nPetrópolis, RJ | Dados de Variação\n\n*Cenário Selecionado:* *${scenario.title}*\n\n============================================\n`;
+
+    scenario.candidates.forEach((cand) => {
+      text += `*${cand.name}* (${cand.party}):\n`;
+      scenario.data.forEach((d) => {
+        const cycleName = d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle;
+        const pct = ((d[cand.name] as number) || 0).toFixed(1);
+        text += `  • ${cycleName}: *${pct}%*\n`;
+      });
+      const val1 = (scenario.data[0][cand.name] as number) || 0;
+      const valLatest = (scenario.data[scenario.data.length - 1][cand.name] as number) || 0;
+      const diff = parseFloat((valLatest - val1).toFixed(1));
+      const diffText = diff === 0 ? "Estável (=)" : diff > 0 ? `+${diff}%` : `${diff}%`;
+      text += `  • Flutuação Líquida: *${diffText}*\n\n`;
+    });
+
+    text += `============================================\n*👉 Relatório Técnico Linkon Inteligência*\n*Site:* grupolinkon.com\nGerado em: ${new Date().toLocaleDateString("pt-BR")} | Código: EXCLUSIVO-PAINEL\n`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedDossier(true);
+      setTimeout(() => setCopiedDossier(false), 2500);
+    });
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn">
       
@@ -258,7 +256,7 @@ Dados consolidados quinzenalmente.
             Evolução Histórica Real (Entrevistados)
           </h3>
           <p className="text-xs text-gray-400 max-w-2xl leading-relaxed">
-            Acompanhamento consolidado de todos os ciclos quinzenais anteriores. O algoritmo reconstrói retroativamente e em tempo real a trajetória gráfica de variação estatística com base nas fichas registradas no sistema.
+            Acompanhamento consolidado de todos os ciclos quinzenais anteriores. O algoritmo reconstrói retroativamente e em tempo real a trajetória gráfica de variação percentual com base nas fichas registradas no sistema.
           </p>
         </div>
         <div className="flex shrink-0">
@@ -268,13 +266,49 @@ Dados consolidados quinzenalmente.
         </div>
       </div>
 
+      {/* METODOLOGIA DOS CICLOS EXPLICADA */}
+      <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-5 space-y-4">
+        <div className="flex items-start gap-3 border-b border-[#1b1c23] pb-3">
+          <div className="p-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[#3b82f6] shrink-0">
+            <Info className="h-4 w-4" />
+          </div>
+          <div className="text-left">
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Como funcionam os Ciclos de Sondagem Rotativos?</h4>
+            <p className="text-[11px] text-gray-400">Metodologia oficial para controle de amostragens do Instituto Linkon.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
+          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
+            <h5 className="text-[11px] font-bold text-blue-400 uppercase tracking-widest font-mono">1. Período de 15 Dias</h5>
+            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
+              As coletas de campo e entrevistas ficam sob vigência por exatos 15 days. Todos os questionários respondidos na região de Petrópolis acumulam-se e compõem a amostragem real e ativa do ciclo corrente.
+            </p>
+          </div>
+
+          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
+            <h5 className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest font-mono">2. Dados 100% Reais</h5>
+            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
+              Cada ponto do gráfico representa a expressão direta de eleitores reais. Não há estimativa de IA ou simulação automatizada nas apurações correntes: a evolução amostral é fidedigna e baseada unicamente nas urnas de opinião coletadas.
+            </p>
+          </div>
+
+          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
+            <h5 className="text-[11px] font-bold text-purple-400 uppercase tracking-widest font-mono">3. Liberação de Dispositivos</h5>
+            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
+              Apenas um voto por dispositivo é autorizado por ciclo de campo. Ao iniciar uma nova roda quinzenal, o sistema limpa o banco anterior, de modo a liberar os dispositivos de forma transparente para permitir nova participação real.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Office Selector Filters row */}
-      <div className="flex flex-wrap bg-[#0a0a0f] p-1 border border-[#1e202e] rounded-2xl gap-1 max-w-fit">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:flex bg-[#0a0a0f] p-1.5 border border-[#1e202e] rounded-2xl gap-1.5 w-full md:w-max">
         {(Object.keys(computedEvolutionData) as OfficeType[]).map((officeKey) => (
           <button
             key={officeKey}
             onClick={() => setSelectedOffice(officeKey)}
-            className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer ${
+            className={`px-4 py-2.5 text-xs font-black rounded-xl transition-all text-center flex items-center justify-center cursor-pointer ${
               selectedOffice === officeKey
                 ? "bg-[#3b82f6] text-white shadow-lg shadow-[#3b82f6]/10"
                 : "text-gray-400 hover:text-white"
@@ -362,16 +396,25 @@ Dados consolidados quinzenalmente.
       {isAdmin ? (
         /* PREMIUM DETAILED ADMIN MODE VIEW */
         <div className="bg-[#0e0f14] border border-[#1f212a] rounded-3xl p-6 space-y-6 animate-fadeIn">
-          <div className="flex items-center gap-2 border-b border-[#1b1c23] pb-4">
-            <div className="p-2 bg-purple-500/10 border border-purple-500/25 rounded-lg text-purple-400">
-              <ShieldAlert className="h-4 w-4" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b1c23] pb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-purple-500/10 border border-purple-500/25 rounded-lg text-purple-400 shrink-0">
+                <ShieldAlert className="h-4 w-4" />
+              </div>
+              <div className="text-left">
+                <h4 className="text-xs font-bold text-white font-mono uppercase tracking-widest">
+                  Dossiê Numérico Real Detalhado (Exclusivo Painel)
+                </h4>
+                <p className="text-[11px] text-gray-500">Mapeamento preciso de variação percentual quinzenal de acordo com os votos reais.</p>
+              </div>
             </div>
-            <div className="text-left">
-              <h4 className="text-xs font-bold text-white font-mono uppercase tracking-widest">
-                Dossiê Numérico Real Detalhado (Exclusivo Painel)
-              </h4>
-              <p className="text-[11px] text-gray-500">Mapeamento preciso de variação percentual quinzenal de acordo com os votos reais.</p>
-            </div>
+            <button
+              onClick={handleCopyDossier}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-purple-500/10 transition-all font-mono uppercase shrink-0"
+            >
+              {copiedDossier ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copiedDossier ? "Dossiê Copiado!" : "Copiar Dossiê WhatsApp"}
+            </button>
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-[#1c1d27]">
@@ -381,7 +424,7 @@ Dados consolidados quinzenalmente.
                   <th className="py-3 px-4">Pré-Candidato (Partido)</th>
                   {scenario.data.map((d, index) => (
                     <th key={index} className="py-3 px-4 whitespace-nowrap">
-                      {d.cycle} <span className="block text-[9px] text-gray-500 font-normal">{d.dateRange}</span>
+                      {d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle} <span className="block text-[9px] text-gray-500 font-normal">{d.dateRange}</span>
                     </th>
                   ))}
                   <th className="py-3 px-4 text-emerald-400 text-right">Flutuação Líquida</th>

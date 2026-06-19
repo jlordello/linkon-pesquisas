@@ -15,7 +15,9 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   Info, 
-  ShieldCheck 
+  ShieldCheck,
+  Calendar,
+  Unlock
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
@@ -32,7 +34,10 @@ import {
   generateMarkdownReport,
   PETROPOLIS_NEIGHBORHOODS,
   getCurrentCycleDates,
-  calculateCandidateProfile
+  getNextCycleStartDate,
+  calculateCandidateProfile,
+  getDistrictForNeighborhood,
+  NEIGHBORHOODS_BY_DISTRICT
 } from "./types";
 
 // Modular Survey Steps
@@ -64,15 +69,22 @@ export default function App() {
     evalGovernor: "",
     evalMayor: "",
     votePresident: "",
+    votePresidentRunoff: "",
     voteGovernor: "",
+    voteGovernorRunoff: "",
     voteSenate: [],
     voteStateDeputy: "",
-    voteFederalDeputy: ""
+    voteFederalDeputy: "",
+    voteMayorPetropolis: "",
+    education: "",
+    income: "",
+    color: "",
+    religion: ""
   });
 
   // Analyst Control Center States
   const [analystTab, setAnalystTab] = useState<"scenarios" | "approvals" | "demographics" | "report" | "evolution">("scenarios");
-  const [activeScenario, setActiveScenario] = useState<"president" | "presidentRunoff" | "governor" | "governorRunoff" | "senate" | "stateDeputy" | "federalDeputy">("president");
+  const [activeScenario, setActiveScenario] = useState<"president" | "presidentRunoff" | "governor" | "governorRunoff" | "senate" | "stateDeputy" | "federalDeputy" | "mayor">("president");
   const [valuationViewType, setValuationViewType] = useState<"valids" | "totals">("valids");
   
   // Notification states
@@ -111,28 +123,37 @@ export default function App() {
     };
   }, []);
 
-  // Scroll to top of page on surveyStep change to eliminate manual scrolling
+  // Scroll to top of page on survey step progress or major viewpoint switches
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-    document.documentElement.scrollTo({ top: 0, behavior: "smooth" });
-    document.body.scrollTo({ top: 0, behavior: "smooth" });
-  }, [surveyStep]);
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0 });
+      document.documentElement.scrollTo({ top: 0 });
+      document.body.scrollTo({ top: 0 });
+    };
+    
+    scrollToTop();
+    const timer = setTimeout(scrollToTop, 20); // Fail-safe fallback for React paint delays
+    return () => clearTimeout(timer);
+  }, [
+    surveyStep,
+    activeView
+  ]);
 
   // Load Seed / Data base with automatic 15-day cycle reset
   useEffect(() => {
     const currentCycle = getCurrentCycleDates();
     const storedCycle = localStorage.getItem("linkon_survey_cycle");
+    const submittedKey = "linkon_survey_submitted_" + currentCycle.key;
     
     let hasReset = false;
     // If the registered cycle has changed, completely clear the state automatically!
     if (storedCycle !== currentCycle.key) {
       localStorage.setItem("linkon_survey_cycle", currentCycle.key);
-      localStorage.removeItem("linkon_survey_submitted");
       localStorage.removeItem("linkon_survey_responses");
       setAlreadyVoted(false);
       hasReset = true;
     } else {
-      const submitted = localStorage.getItem("linkon_survey_submitted") === "true";
+      const submitted = localStorage.getItem(submittedKey) === "true";
       setAlreadyVoted(submitted);
       if (submitted) {
         setActiveView("analyst");
@@ -172,31 +193,63 @@ export default function App() {
     const genderOptions = ["Feminino", "Masculino", "Outro"];
     const evalOptions = ["positive", "regular", "negative", "dontKnow"];
     
-    // Real Candidate IDs of Linkon Pesquisas
+    // Real Candidate IDs of Linkon
     const candidatesPres = ["pres-lula", "pres-flavio", "pres-caiado", "pres-zema", "pres-renan", "pres-daciolo", "pres-samara"];
     const candidatesGov = ["gov-paes", "gov-ruas", "gov-luizinho", "gov-reis", "gov-marinho", "gov-siri", "gov-amorim"];
     const candidatesSen = ["sen-crivella", "sen-benedita", "sen-monica", "sen-otoni", "sen-pedro"];
     const candidatesState = ["est-yuri", "est-fred", "est-octavio", "est-junior", "est-paulo", "est-gilda", "est-eduardo", "est-rodrigo", "est-renata", "est-sergio", "est-leonardo", "est-dani"];
     const candidatesFederal = ["fed-hugo", "fed-bernardo", "fed-rubens", "fed-leandro", "fed-julia", "fed-pazuello", "fed-taliria", "fed-taina", "fed-jandira"];
+    const candidatesMayor = ["may-hingo", "may-yuri", "may-paulo", "may-rubens", "may-eduardo"];
 
     const testResponses: SurveyResponse[] = Array.from({ length: 150 }, (_, i) => {
       const idx = Math.floor(Math.random() * PETROPOLIS_NEIGHBORHOODS.length);
       const neigh = PETROPOLIS_NEIGHBORHOODS[idx] || "Centro";
       
+      const educationOptions = [
+        "Fundamental Completo ou Incompleto",
+        "Ensino Médio Completo ou Incompleto",
+        "Ensino Superior Completo ou Mais"
+      ];
+      const incomeOptions = [
+        "Até 2 Salários Mínimos",
+        "De 2 a 5 Salários Mínimos",
+        "Mais de 5 Salários Mínimos"
+      ];
+      const colorOptions = [
+        "Amarela",
+        "Branca",
+        "Indígena",
+        "Parda",
+        "Preta"
+      ];
+      const religionOptions = [
+        "Católica",
+        "Evangélica/Protestante",
+        "Espírita / Umbanda / Candomblé",
+        "Outra / Sem Religião"
+      ];
+
       return {
         id: `li-res-test-${1000 + i}`,
         timestamp: new Date(Date.now() - Math.floor(Math.random() * 800000000)).toISOString(),
         gender: genderOptions[Math.floor(Math.random() * genderOptions.length)],
         age: ageOptions[Math.floor(Math.random() * ageOptions.length)],
         neighborhood: neigh,
+        education: educationOptions[Math.floor(Math.random() * educationOptions.length)],
+        income: incomeOptions[Math.floor(Math.random() * incomeOptions.length)],
+        color: colorOptions[Math.floor(Math.random() * colorOptions.length)],
+        religion: religionOptions[Math.floor(Math.random() * religionOptions.length)],
         evalLula: evalOptions[Math.floor(Math.random() * evalOptions.length)],
         evalGovernor: evalOptions[Math.floor(Math.random() * evalOptions.length)],
         evalMayor: evalOptions[Math.floor(Math.random() * evalOptions.length)],
         votePresident: Math.random() < 0.1 ? "indecisos" : Math.random() < 0.08 ? "brancosNulos" : candidatesPres[Math.floor(Math.random() * candidatesPres.length)],
+        votePresidentRunoff: Math.random() < 0.1 ? "indecisos" : Math.random() < 0.08 ? "brancosNulos" : (Math.random() < 0.5 ? "pres-lula" : "pres-flavio"),
         voteGovernor: Math.random() < 0.12 ? "indecisos" : Math.random() < 0.08 ? "brancosNulos" : candidatesGov[Math.floor(Math.random() * candidatesGov.length)],
+        voteGovernorRunoff: Math.random() < 0.1 ? "indecisos" : Math.random() < 0.08 ? "brancosNulos" : (Math.random() < 0.5 ? "gov-paes" : "gov-ruas"),
         voteSenate: [candidatesSen[Math.floor(Math.random() * candidatesSen.length)]],
         voteStateDeputy: Math.random() < 0.15 ? "indecisos" : Math.random() < 0.1 ? "brancosNulos" : candidatesState[Math.floor(Math.random() * candidatesState.length)],
-        voteFederalDeputy: Math.random() < 0.15 ? "indecisos" : Math.random() < 0.1 ? "brancosNulos" : candidatesFederal[Math.floor(Math.random() * candidatesFederal.length)]
+        voteFederalDeputy: Math.random() < 0.15 ? "indecisos" : Math.random() < 0.1 ? "brancosNulos" : candidatesFederal[Math.floor(Math.random() * candidatesFederal.length)],
+        voteMayorPetropolis: Math.random() < 0.1 ? "indecisos" : Math.random() < 0.08 ? "brancosNulos" : candidatesMayor[Math.floor(Math.random() * candidatesMayor.length)]
       };
     });
 
@@ -211,7 +264,9 @@ export default function App() {
   };
 
   const confirmClearDatabase = () => {
+    const currentCycle = getCurrentCycleDates();
     updateDatabase([]);
+    localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
     localStorage.removeItem("linkon_survey_submitted");
     setAlreadyVoted(false);
     setShowClearConfirm(false);
@@ -296,6 +351,15 @@ export default function App() {
     );
   }, [activePollData.governorRunoff]);
 
+  const mayorValids = useMemo(() => {
+    if (!activePollData.mayorScenario) return [];
+    return calculateValidVotes(
+      activePollData.mayorScenario.candidates,
+      activePollData.mayorScenario.brancosNulos,
+      activePollData.mayorScenario.indecisos
+    );
+  }, [activePollData.mayorScenario]);
+
   useEffect(() => {
     if (activeScenario === "presidentRunoff" && !activePollData.presidentRunoff?.showRunoff) {
       setActiveScenario("president");
@@ -310,15 +374,51 @@ export default function App() {
     const genderCounts: Record<string, number> = {};
     const ageCounts: Record<string, number> = {};
     const neighborhoodCounts: Record<string, number> = {};
+    const educationCounts: Record<string, number> = {};
+    const incomeCounts: Record<string, number> = {};
+    const colorCounts: Record<string, number> = {};
+    const religionCounts: Record<string, number> = {};
+    const districtCounts: Record<string, number> = {
+      "1º Distrito: Petrópolis": 0,
+      "2º Distrito: Cascatinha": 0,
+      "3º Distrito: Itaipava": 0,
+      "4º Distrito: Pedro do Rio": 0,
+      "5º Distrito: Posse": 0,
+      "Outros / Não Especificado": 0
+    };
 
     responses.forEach(r => {
       genderCounts[r.gender] = (genderCounts[r.gender] || 0) + 1;
       ageCounts[r.age] = (ageCounts[r.age] || 0) + 1;
       neighborhoodCounts[r.neighborhood] = (neighborhoodCounts[r.neighborhood] || 0) + 1;
+      
+      const dist = getDistrictForNeighborhood(r.neighborhood || "");
+      districtCounts[dist] = (districtCounts[dist] || 0) + 1;
+
+      const edu = r.education || "Não Informado";
+      educationCounts[edu] = (educationCounts[edu] || 0) + 1;
+
+      const inc = r.income || "Não Informado";
+      incomeCounts[inc] = (incomeCounts[inc] || 0) + 1;
+
+      const col = r.color || "Não Informado";
+      colorCounts[col] = (colorCounts[col] || 0) + 1;
+
+      const rel = r.religion || "Não Informado";
+      religionCounts[rel] = (religionCounts[rel] || 0) + 1;
     });
 
     // Modern Deep Blue and Emerald Palette for confidence
     const colors = ["#3b82f6", "#10b981", "#06b6d4", "#8b5cf6", "#f43f5e", "#f59e0b", "#14b8a6", "#6b7280", "#a855f7", "#ec4899"];
+
+    // Remove empty other districts if they have 0 responses, but keep the 5 main districts visible
+    const formattedDistricts = Object.entries(districtCounts)
+      .map(([name, value], i) => ({
+        name,
+        value,
+        color: ["#3b82f6", "#10b981", "#a855f7", "#f59e0b", "#ec4899", "#6b7280"][i % 6]
+      }))
+      .filter(d => d.value > 0 || d.name !== "Outros / Não Especificado");
 
     return {
       gender: Object.entries(genderCounts).map(([name, value], i) => ({ name, value, color: colors[i % colors.length] })),
@@ -327,7 +427,12 @@ export default function App() {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
         .slice(0, 8)
-        .map((item, i) => ({ ...item, color: colors[(i + 2) % colors.length] }))
+        .map((item, i) => ({ ...item, color: colors[(i + 2) % colors.length] })),
+      districts: formattedDistricts,
+      education: Object.entries(educationCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 3) % colors.length] })),
+      income: Object.entries(incomeCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 4) % colors.length] })),
+      color: Object.entries(colorCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 5) % colors.length] })),
+      religion: Object.entries(religionCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 6) % colors.length] }))
     };
   }, [responses]);
 
@@ -347,7 +452,15 @@ export default function App() {
 
   const handleNextStep = () => {
     if (surveyStep === 1) {
-      if (!surveyAnswers.gender || !surveyAnswers.age || !surveyAnswers.neighborhood) {
+      if (
+        !surveyAnswers.gender || 
+        !surveyAnswers.age || 
+        !surveyAnswers.neighborhood ||
+        !surveyAnswers.education ||
+        !surveyAnswers.income ||
+        !surveyAnswers.color ||
+        !surveyAnswers.religion
+      ) {
         showNotification("Preencha todas as variáveis demográficas para continuar.", "warning");
         return;
       }
@@ -362,20 +475,36 @@ export default function App() {
       showNotification("Por favor, selecione uma opção presidencial.", "warning");
       return;
     }
-    if (surveyStep === 4 && !surveyAnswers.voteGovernor) {
+    if (surveyStep === 4 && !surveyAnswers.votePresidentRunoff) {
+      showNotification("Por favor, selecione uma opção para a simulação de Segundo Turno Presidencial.", "warning");
+      return;
+    }
+    if (surveyStep === 5 && !surveyAnswers.voteGovernor) {
       showNotification("Por favor, selecione uma opção para Governador.", "warning");
       return;
     }
-    if (surveyStep === 5 && (!surveyAnswers.voteSenate || surveyAnswers.voteSenate.length === 0)) {
-      showNotification("Por favor, selecione pelo menos uma opção para o Senado.", "warning");
+    if (surveyStep === 6 && !surveyAnswers.voteGovernorRunoff) {
+      showNotification("Por favor, selecione uma opção para a simulação de Segundo Turno para Governador.", "warning");
       return;
     }
-    if (surveyStep === 6 && !surveyAnswers.voteStateDeputy) {
+    if (surveyStep === 7) {
+      const isSpecial = surveyAnswers.voteSenate?.includes("brancosNulos") || surveyAnswers.voteSenate?.includes("indecisos");
+      const isValidSenate = isSpecial || (surveyAnswers.voteSenate && surveyAnswers.voteSenate.length === 2);
+      if (!isValidSenate) {
+        showNotification("Por favor, selecione exatamente 2 candidatos ou clique em Branco/Nulo para o Senado.", "warning");
+        return;
+      }
+    }
+    if (surveyStep === 8 && !surveyAnswers.voteStateDeputy) {
       showNotification("Por favor, selecione um candidato a Deputado Estadual.", "warning");
       return;
     }
-    if (surveyStep === 7 && !surveyAnswers.voteFederalDeputy) {
+    if (surveyStep === 9 && !surveyAnswers.voteFederalDeputy) {
       showNotification("Por favor, selecione um candidato a Deputado Federal.", "warning");
+      return;
+    }
+    if (surveyStep === 10 && !surveyAnswers.voteMayorPetropolis) {
+      showNotification("Por favor, selecione um candidato a Prefeito de Petrópolis.", "warning");
       return;
     }
     
@@ -392,26 +521,8 @@ export default function App() {
 
   // Submit survey responses
   const handleSurveySubmit = () => {
-    const gender = Math.random() < 0.52 ? "Feminino" : "Masculino";
-    const ageRoll = Math.random();
-    let age = "35-44";
-    if (ageRoll < 0.15) age = "16-24";
-    else if (ageRoll < 0.35) age = "25-34";
-    else if (ageRoll < 0.60) age = "35-44";
-    else if (ageRoll < 0.85) age = "45-59";
-    else age = "60+";
-
-    const neighborhoods = [
-      "Alto da Serra", "Bingen", "Cascatinha", "Centro", "Corrêas", "Itaipava", "Itamarati", 
-      "Nogueira", "Quitandinha", "Retiro", "Samambaia", "Valparaíso"
-    ];
-    const neighborhood = neighborhoods[Math.floor(Math.random() * neighborhoods.length)];
-
     const finalResponse: SurveyResponse = {
       ...surveyAnswers,
-      gender,
-      age,
-      neighborhood,
       id: `li-res-usr-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString()
     };
@@ -419,11 +530,12 @@ export default function App() {
     const updated = [...responses, finalResponse];
     updateDatabase(updated);
     
-    localStorage.setItem("linkon_survey_submitted", "true");
+    const currentCycle = getCurrentCycleDates();
+    localStorage.setItem("linkon_survey_submitted_" + currentCycle.key, "true");
     setAlreadyVoted(true);
     setSurveySubmitted(true);
-    showNotification("Pesquisa enviada! Seus dados foram adicionados às estatísticas gerais de Petrópolis.", "success");
-    setSurveyStep(9);
+    showNotification("Sondagem enviada! Seus dados foram consolidados no painel de Petrópolis.", "success");
+    setSurveyStep(12);
   };
 
   // Clean reset
@@ -436,10 +548,17 @@ export default function App() {
       evalGovernor: "",
       evalMayor: "",
       votePresident: "",
+      votePresidentRunoff: "",
       voteGovernor: "",
+      voteGovernorRunoff: "",
       voteSenate: [],
       voteStateDeputy: "",
-      voteFederalDeputy: ""
+      voteFederalDeputy: "",
+      voteMayorPetropolis: "",
+      education: "",
+      income: "",
+      color: "",
+      religion: ""
     });
     setSurveySubmitted(false);
     setSurveyStep(0);
@@ -458,11 +577,21 @@ export default function App() {
 
   const handleHardResetDatabase = () => {
     if (window.confirm("Zerar integralmente o banco de dados?")) {
+      const currentCycle = getCurrentCycleDates();
       updateDatabase([]);
+      localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
       localStorage.removeItem("linkon_survey_submitted");
       setAlreadyVoted(false);
       showNotification("Banco de dados reiniciado e limpo para votações reais.", "warning");
     }
+  };
+
+  const handleUnlockAllDevices = () => {
+    const currentCycle = getCurrentCycleDates();
+    localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
+    localStorage.removeItem("linkon_survey_submitted");
+    setAlreadyVoted(false);
+    showNotification("Dispositivos liberados com sucesso! Bloqueio de respostas redefinido para este navegador.", "success");
   };
 
   const handleClearAllDatabases = () => {
@@ -479,7 +608,7 @@ export default function App() {
   };
 
   // Helper labels resolution
-  const getCandidateName = (id: string | string[], scenario: "pres" | "gov" | "sen" | "state" | "fed") => {
+  const getCandidateName = (id: string | string[], scenario: "pres" | "presRunoff" | "gov" | "govRunoff" | "sen" | "state" | "fed" | "mayor") => {
     if (Array.isArray(id)) {
       if (id.length === 0) return "Nenhum selecionado";
       if (id.includes("brancosNulos")) return "Brancos / Nulos";
@@ -499,14 +628,23 @@ export default function App() {
     if (scenario === "pres") {
       const cand = activePollData.presidentScenario.candidates.find(c => c.id === id);
       return cand ? `${cand.name} (${cand.party})` : id;
+    } else if (scenario === "presRunoff") {
+      const cand = activePollData.presidentRunoff?.candidates.find(c => c.id === id);
+      return cand ? `${cand.name} (${cand.party})` : id;
     } else if (scenario === "gov") {
       const cand = activePollData.governorScenario.candidates.find(c => c.id === id);
+      return cand ? `${cand.name} (${cand.party})` : id;
+    } else if (scenario === "govRunoff") {
+      const cand = activePollData.governorRunoff?.candidates.find(c => c.id === id);
       return cand ? `${cand.name} (${cand.party})` : id;
     } else if (scenario === "sen") {
       const cand = activePollData.senateScenario.candidates.find(c => c.id === id);
       return cand ? `${cand.name} (${cand.party})` : id;
     } else if (scenario === "state") {
       const cand = activePollData.stateDeputyScenario.candidates.find(c => c.id === id);
+      return cand ? `${cand.name} (${cand.party})` : id;
+    } else if (scenario === "mayor") {
+      const cand = activePollData.mayorScenario?.candidates.find(c => c.id === id);
       return cand ? `${cand.name} (${cand.party})` : id;
     } else {
       const cand = activePollData.federalDeputyScenario.candidates.find(c => c.id === id);
@@ -563,6 +701,19 @@ export default function App() {
       .map(n => `  • ${n.neighborhood}: *${n.percentage}%* (${n.count} votos)`)
       .join("\n");
       
+    const formattedEdu = Object.entries(candidateProfile.education || {})
+      .map(([k, v]) => `  • ${k}: *${v}%*`)
+      .join("\n");
+    const formattedInc = Object.entries(candidateProfile.income || {})
+      .map(([k, v]) => `  • ${k}: *${v}%*`)
+      .join("\n");
+    const formattedCol = Object.entries(candidateProfile.color || {})
+      .map(([k, v]) => `  • ${k}: *${v}%*`)
+      .join("\n");
+    const formattedRel = Object.entries(candidateProfile.religion || {})
+      .map(([k, v]) => `  • ${k}: *${v}%*`)
+      .join("\n");
+
     return `*👑 LINKON INTELIGÊNCIA - DIAGNÓSTICO INDIVIDUAL*
 *Dossiê Consultivo de Pré-Candidatura*
 
@@ -592,6 +743,18 @@ export default function App() {
 • 45-59 anos: *${candidateProfile.age["45-59"]}%*
 • 60+ anos: *${candidateProfile.age["60+"]}%*
 
+*Escolaridade:*
+${formattedEdu || "  • Não Informado: 100%"}
+
+*Faixa de Renda Familiar:*
+${formattedInc || "  • Não Informado: 100%"}
+
+*Cor ou Raça:*
+${formattedCol || "  • Não Informado: 100%"}
+
+*Religião:*
+${formattedRel || "  • Não Informado: 100%"}
+
 --------------------------------------------
 
 *📍 PRINCIPAIS BAIRROS DE APOIO (Top 5):*
@@ -617,7 +780,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 • Ruim/Péssimo: *${candidateProfile.evaluations.mayor.negative}%*
 
 --------------------------------------------
-*👉 Plataforma Administrativa Linkon Pesquisas*
+*👉 Plataforma Administrativa Linkon - Sondagem Eleitoral*
 *Website Oficial:* grupolinkon.com
 `;
   };
@@ -687,6 +850,15 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               </div>
               
               <div className="flex items-center gap-2">
+                <button
+                  onClick={handleUnlockAllDevices}
+                  className="px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5"
+                  title="Caso o sistema não libere os entrevistados de responder novamente a pesquisa no início de uma nova rodada, clique aqui para liberar este navegador."
+                >
+                  <Unlock className="h-3.5 w-3.5" />
+                  Liberar Dispositivos
+                </button>
+
                 <button
                   onClick={handleClearDatabase}
                   className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5"
@@ -1041,6 +1213,131 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
                         </div>
 
+                        {/* Breakdown 1.5: Advanced Demographics Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          
+                          {/* EDUCATION BLOCKS */}
+                          <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
+                            <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
+                              🎓 ESCOLARIDADE DOS ELEITORES
+                            </h3>
+                            <div className="space-y-3 pt-1">
+                              {!candidateProfile.education || Object.entries(candidateProfile.education).length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">Sem dados registrados</p>
+                              ) : (
+                                Object.entries(candidateProfile.education)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([label, val], idx) => {
+                                    const colors = ["bg-emerald-500", "bg-teal-500", "bg-cyan-500"];
+                                    const color = colors[idx % colors.length];
+                                    return (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-xs font-semibold mb-1">
+                                          <span className="text-gray-400 truncate max-w-[80%]" title={label}>{label}</span>
+                                          <span className="text-white font-mono font-bold">{val}%</span>
+                                        </div>
+                                        <div className="w-full bg-[#161720] h-2.5 rounded-full overflow-hidden">
+                                          <div className={`${color} h-full rounded-full`} style={{ width: `${val}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                            </div>
+                          </div>
+
+                          {/* INCOME BLOCKS */}
+                          <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
+                            <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
+                              💰 FAIXA DE RENDA FAMILIAR
+                            </h3>
+                            <div className="space-y-3 pt-1">
+                              {!candidateProfile.income || Object.entries(candidateProfile.income).length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">Sem dados registrados</p>
+                              ) : (
+                                Object.entries(candidateProfile.income)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([label, val], idx) => {
+                                    const colors = ["bg-amber-500", "bg-yellow-500", "bg-orange-500"];
+                                    const color = colors[idx % colors.length];
+                                    return (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-xs font-semibold mb-1">
+                                          <span className="text-gray-400 truncate max-w-[80%]" title={label}>{label}</span>
+                                          <span className="text-white font-mono font-bold">{val}%</span>
+                                        </div>
+                                        <div className="w-full bg-[#161720] h-2.5 rounded-full overflow-hidden">
+                                          <div className={`${color} h-full rounded-full`} style={{ width: `${val}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                            </div>
+                          </div>
+
+                          {/* COLOR / RACE BLOCKS */}
+                          <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
+                            <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
+                              🎨 DECLARAÇÃO DE COR OU RAÇA
+                            </h3>
+                            <div className="space-y-3 pt-1">
+                              {!candidateProfile.color || Object.entries(candidateProfile.color).length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">Sem dados registrados</p>
+                              ) : (
+                                                                Object.entries(candidateProfile.color)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([label, val], idx) => {
+                                    const colors = ["bg-purple-500", "bg-fuchsia-500", "bg-pink-500", "bg-violet-500", "bg-rose-500"];
+                                    const color = colors[idx % colors.length];
+                                    return (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-xs font-semibold mb-1">
+                                          <span className="text-gray-400 truncate max-w-[80%]" title={label}>{label}</span>
+                                          <span className="text-white font-mono font-bold">{val}%</span>
+                                        </div>
+                                        <div className="w-full bg-[#161720] h-2.5 rounded-full overflow-hidden">
+                                          <div className={`${color} h-full rounded-full`} style={{ width: `${val}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                            </div>
+                          </div>
+
+                          {/* RELIGION BLOCKS */}
+                          <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
+                            <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
+                              ⛪ CREDO OU RELIGIÃO DO ELEITORADO
+                            </h3>
+                            <div className="space-y-3 pt-1">
+                              {!candidateProfile.religion || Object.entries(candidateProfile.religion).length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">Sem dados registrados</p>
+                              ) : (
+                                Object.entries(candidateProfile.religion)
+                                  .sort((a, b) => (b[1] as number) - (a[1] as number))
+                                  .map(([label, val], idx) => {
+                                    const colors = ["bg-sky-500", "bg-blue-500", "bg-indigo-500", "bg-blue-600"];
+                                    const color = colors[idx % colors.length];
+                                    return (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-xs font-semibold mb-1">
+                                          <span className="text-gray-400 truncate max-w-[80%]" title={label}>{label}</span>
+                                          <span className="text-white font-mono font-bold">{val}%</span>
+                                        </div>
+                                        <div className="w-full bg-[#161720] h-2.5 rounded-full overflow-hidden">
+                                          <div className={`${color} h-full rounded-full`} style={{ width: `${val}%` }} />
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+
                         {/* Breakdown 2: Districts / Neighborhoods list */}
                         <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
                           <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
@@ -1354,7 +1651,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
                         <span className="text-lg font-bold font-mono text-[#3b82f6]">LINKON</span>
-                        <span className="text-[8px] text-gray-400 uppercase font-mono tracking-widest font-semibold">Pesquisas</span>
+                        <span className="text-[8px] text-gray-400 uppercase font-mono tracking-widest font-semibold">Sondagem</span>
                       </div>
                     </div>
 
@@ -1394,11 +1691,11 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   Instituto <span className="text-[#3b82f6]">Linkon</span>
                 </h1>
                 <span className="text-[9px] bg-blue-500/15 text-blue-400 font-semibold border border-blue-500/20 px-1.5 py-0.5 rounded uppercase font-mono tracking-wide">
-                  Pesquisas
+                  Sondagem Eleitoral
                 </span>
               </div>
               <p className="text-[10px] text-gray-400 font-mono tracking-tight leading-none mt-0.5">
-                Opinião Pública & Modelagem Estatística • Petrópolis-RJ
+                Opinião Pública & Modelagem Amostral • Petrópolis-RJ
               </p>
             </div>
           </div>
@@ -1447,15 +1744,20 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               <div className="space-y-4">
                 <h3 className="text-xl font-bold font-display text-white">Voto já Computado!</h3>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Para honrar a integridade metodológica de forma justa, só é permitido a resposta uma única vez.
+                  Para honrar a integridade metodológica de forma justa, cada dispositivo só pode responder uma amostragem por ciclo quinzenal.
                 </p>
+                <div className="bg-[#12141f] border border-[#212330] rounded-xl p-4 text-left space-y-1">
+                  <span className="text-[9px] text-[#3b82f6] font-mono font-bold tracking-wider uppercase block">Bloqueio Metodológico de IP/Dispositivo</span>
+                  <p className="text-xs text-gray-300">Este dispositivo poderá responder a uma nova amostragem a partir de:</p>
+                  <p className="text-sm text-emerald-400 font-mono font-black mt-1.5 bg-[#0f2118] inline-block px-3 py-1 rounded border border-emerald-500/20">{getNextCycleStartDate()}</p>
+                </div>
               </div>
               <button
                 onClick={() => setActiveView("analyst")}
-                className="w-full px-5 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10"
+                className="w-full px-5 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 animate-pulse"
               >
                 <BarChart4 className="h-4 w-4" />
-                Examinar Painel de Estatísticas
+                Examinar Painel de Resultados
               </button>
             </div>
           ) : (
@@ -1463,7 +1765,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
             
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-2xl font-bold font-display tracking-tight text-white sm:text-3xl">
-                Pesquisa Eleitoral Estimulada
+                Sondagem Eleitoral Estimulada
               </h2>
               <p className="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">
                 Opine sobre o cenário atual de Petrópolis. Suas respostas redefinem os dados do painel geral em tempo real de forma estimulada.
@@ -1475,16 +1777,16 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               <div className="absolute top-0 left-0 right-0 h-1 bg-[#1a1b26]" />
               
               {/* Dynamic Step Tracker indicator */}
-              {surveyStep > 0 && surveyStep < 8 && (
+              {surveyStep > 0 && surveyStep < 11 && (
                 <div className="mb-6 space-y-2">
                   <div className="flex justify-between text-[11px] font-mono text-gray-400">
                     <span>PROGRESSO DE COLETA</span>
-                    <span className="text-[#3b82f6]">Etapa {surveyStep} de 7</span>
+                    <span className="text-[#3b82f6]">Etapa {surveyStep} de 10</span>
                   </div>
                   <div className="w-full bg-[#161821] h-1.5 rounded-full overflow-hidden">
                     <div 
                       className="bg-gradient-to-r from-[#3b82f6] to-[#06b6d4] h-full rounded-full transition-all duration-300"
-                      style={{ width: `${(surveyStep / 7) * 100}%` }}
+                      style={{ width: `${(surveyStep / 10) * 100}%` }}
                     />
                   </div>
                 </div>
@@ -1499,6 +1801,10 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     gender={surveyAnswers.gender}
                     age={surveyAnswers.age}
                     neighborhood={surveyAnswers.neighborhood}
+                    education={surveyAnswers.education}
+                    income={surveyAnswers.income}
+                    color={surveyAnswers.color}
+                    religion={surveyAnswers.religion}
                     onChange={handleAnswerSelect}
                     onNext={handleNextStep}
                   />
@@ -1518,7 +1824,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 {surveyStep === 3 && (
                   <SingleSelectionStep
                     stepKey="step-3"
-                    title="Cenário Presidencial Estimulado"
+                    title="Cenário Presidencial Estimulado (1º Turno)"
                     subtitle="Se as eleições presidenciais fossem hoje, em qual destes candidatos você votaria?"
                     candidates={activePollData.presidentScenario.candidates}
                     selectedValue={surveyAnswers.votePresident}
@@ -1531,6 +1837,19 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 {surveyStep === 4 && (
                   <SingleSelectionStep
                     stepKey="step-4"
+                    title="Cenário Presidencial de Segundo Turno (Simulação)"
+                    subtitle="Em um eventual segundo turno para Presidente entre Lula e Flávio Bolsonaro, em qual destes você votaria?"
+                    candidates={activePollData.presidentRunoff?.candidates || []}
+                    selectedValue={surveyAnswers.votePresidentRunoff || ""}
+                    onChange={(val) => handleAnswerSelect("votePresidentRunoff", val)}
+                    onNext={handleNextStep}
+                    onPrev={handlePrevStep}
+                  />
+                )}
+
+                {surveyStep === 5 && (
+                  <SingleSelectionStep
+                    stepKey="step-5"
                     title="Cenário Estadual (Governador - RJ)"
                     subtitle="Se as eleições para Governador do Estado fossem hoje, qual destas opções você escolheria?"
                     candidates={activePollData.governorScenario.candidates}
@@ -1541,7 +1860,20 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   />
                 )}
 
-                {surveyStep === 5 && (
+                {surveyStep === 6 && (
+                  <SingleSelectionStep
+                    stepKey="step-6"
+                    title="Cenário Estadual de Segundo Turno (Governador • Simulação)"
+                    subtitle="Em um eventual segundo turno para Governador entre Eduardo Paes e Douglas Ruas, qual candidato você escolheria?"
+                    candidates={activePollData.governorRunoff?.candidates || []}
+                    selectedValue={surveyAnswers.voteGovernorRunoff || ""}
+                    onChange={(val) => handleAnswerSelect("voteGovernorRunoff", val)}
+                    onNext={handleNextStep}
+                    onPrev={handlePrevStep}
+                  />
+                )}
+
+                {surveyStep === 7 && (
                   <SenateSelectionStep
                     candidates={activePollData.senateScenario.candidates}
                     selectedValues={surveyAnswers.voteSenate}
@@ -1551,9 +1883,9 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   />
                 )}
 
-                {surveyStep === 6 && (
+                {surveyStep === 8 && (
                   <SingleSelectionStep
-                    stepKey="step-6"
+                    stepKey="step-8"
                     title="Cenário Proporcional - Deputado Estadual"
                     subtitle="Para representar a Região Serrana na ALERJ, qual desses pré-candidatos você escolheria hoje?"
                     candidates={activePollData.stateDeputyScenario.candidates}
@@ -1564,9 +1896,9 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   />
                 )}
 
-                {surveyStep === 7 && (
+                {surveyStep === 9 && (
                   <SingleSelectionStep
-                    stepKey="step-7"
+                    stepKey="step-9"
                     title="Cenário Federal - Deputado Federal"
                     subtitle="Para ser o representante de Petrópolis em Brasília, em qual candidato você depositaria seu voto?"
                     candidates={activePollData.federalDeputyScenario.candidates}
@@ -1574,26 +1906,46 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     onChange={(val) => handleAnswerSelect("voteFederalDeputy", val)}
                     onNext={handleNextStep}
                     onPrev={handlePrevStep}
+                  />
+                )}
+
+                {surveyStep === 10 && (
+                  <SingleSelectionStep
+                    stepKey="step-10"
+                    title="Eleição Municipal - Prefeito de Petrópolis"
+                    subtitle="Se as eleições para Prefeito de Petrópolis fossem hoje, qual destas opções você escolheria?"
+                    candidates={activePollData.mayorScenario?.candidates || []}
+                    selectedValue={surveyAnswers.voteMayorPetropolis || ""}
+                    onChange={(val) => handleAnswerSelect("voteMayorPetropolis", val)}
+                    onNext={handleNextStep}
+                    onPrev={handlePrevStep}
                     btnNextText="Revisar Respostas"
                   />
                 )}
 
-                {surveyStep === 8 && (
+                {surveyStep === 11 && (
                   <ReviewStep
                     gender={surveyAnswers.gender}
                     age={surveyAnswers.age}
                     neighborhood={surveyAnswers.neighborhood}
+                    education={surveyAnswers.education}
+                    income={surveyAnswers.income}
+                    color={surveyAnswers.color}
+                    religion={surveyAnswers.religion}
                     votePresidentName={getCandidateName(surveyAnswers.votePresident, "pres")}
+                    votePresidentRunoffName={getCandidateName(surveyAnswers.votePresidentRunoff || "", "presRunoff")}
                     voteGovernorName={getCandidateName(surveyAnswers.voteGovernor, "gov")}
+                    voteGovernorRunoffName={getCandidateName(surveyAnswers.voteGovernorRunoff || "", "govRunoff")}
                     voteSenateNames={getCandidateName(surveyAnswers.voteSenate, "sen")}
                     voteStateDeputyName={getCandidateName(surveyAnswers.voteStateDeputy, "state")}
                     voteFederalDeputyName={getCandidateName(surveyAnswers.voteFederalDeputy, "fed")}
+                    voteMayorPetropolisName={getCandidateName(surveyAnswers.voteMayorPetropolis || "", "mayor")}
                     onPrev={handlePrevStep}
                     onSubmit={handleSurveySubmit}
                   />
                 )}
 
-                {surveyStep === 9 && (
+                {surveyStep === 12 && (
                   <SuccessStep
                     onRestart={handleResetSurvey}
                     onGoToDashboard={() => {
@@ -1613,6 +1965,48 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
           /* ANALYST VIEW SCREEN (INTELLIGENCE CENTER PANEL) */
           <div className="space-y-8 animate-fadeIn">
             
+            {/* DESTACADO: PERÍODO DE TIRAGEM / RECOLHIMENTO & PRÓXIMA AMOSTRAGEM */}
+            <div className="bg-[#0e0f14] border-2 border-blue-500/30 rounded-2xl p-6 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6">
+              {/* Subtle background gradient splash */}
+              <div className="absolute top-0 right-0 w-64 h-64 bg-[#3b82f6]/5 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="flex items-start gap-4">
+                <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl text-blue-400 shrink-0 mt-0.5">
+                  <Calendar className="h-6 w-6 animate-pulse" />
+                </div>
+                <div className="space-y-1 text-left">
+                  <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">CRONOGRAMA DO CICLO ATIVO</span>
+                  <p className="text-white text-base font-bold font-sans">
+                    Período de Recolhimento da Entrevista: <span className="text-[#3b82f6] font-mono">{getCurrentCycleDates().start} a {getCurrentCycleDates().end}</span>
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Os dados sofrem encerramento e consolidação integral a cada 15 dias. Apenas uma participação por dispositivo é autorizada por ciclo para salvaguardar a amostragem de Petrópolis.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-[#11121c] border border-blue-500/20 p-4 rounded-xl flex items-center gap-3 shrink-0 self-stretch md:self-auto justify-center">
+                <div className="h-8 w-8 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/25 text-emerald-400 font-bold text-xs ring-4 ring-emerald-500/5">
+                  ✓
+                </div>
+                <div className="text-left">
+                  <span className="text-[9px] uppercase font-mono text-gray-450 block font-bold text-gray-400">PRÓXIMA AMOSTRAGEM INICIA EM:</span>
+                  <span className="text-xs font-bold font-mono text-emerald-400">{getNextCycleStartDate()}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Legal / TSE Compliance Announcement Banner */}
+            <div className="bg-[#121420]/75 border-s-4 border-yellow-500/80 rounded-r-2xl p-5 text-left space-y-2.5 shadow-xl border-y border-e border-[#1d1f30]">
+              <div className="flex items-center gap-2">
+                <span className="text-base">⚖️</span>
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Aviso de Conformidade Legal (Resolução nº 23.600 do TSE)</h4>
+              </div>
+              <p className="text-xs text-gray-200 leading-relaxed font-sans">
+                Este é um projeto de automação de dados e inteligência artificial. Os dados coletados não possuem valor estatístico científico e não serão divulgados publicamente como pesquisa eleitoral.
+              </p>
+            </div>
+
             {/* Upper stats summary card block row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               
@@ -1650,38 +2044,27 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
             </div>
 
             {/* Tab navigation headers in analyst dashboard */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b1c23] pb-4">
-              
-              <div className="flex bg-[#0f1016] p-1.5 rounded-xl border border-[#21232e] gap-1 shrink-0 overflow-x-auto max-w-full">
+            <div className="border-b border-[#1b1c23] pb-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:flex bg-[#0f1016] p-1.5 rounded-xl border border-[#21232e] gap-1.5 w-full lg:w-max">
                 {[
-                  { id: "scenarios", label: "🗳️ Cenários Eleitorais" },
-                  { id: "approvals", label: "📈 Avaliação de Mandatos" },
+                  { id: "scenarios", label: "🗳️ Cenários" },
+                  { id: "approvals", label: "📈 Avaliação" },
+                  { id: "demographics", label: "👥 Perfil Demográfico" },
                   { id: "evolution", label: "📈 Histórico & Evolução" },
-                  { id: "report", label: "📄 Relatório para Imprensas" }
+                  { id: "report", label: "📄 Relatório Imprensas" }
                 ].map((item) => (
                   <button
                     key={item.id}
                     onClick={() => setAnalystTab(item.id as any)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                    className={`px-3 py-2 text-xs font-bold rounded-lg transition-all text-center flex items-center justify-center cursor-pointer ${
                       analystTab === item.id
-                        ? "bg-[#3b82f6] text-white shadow-md shadow-[#3b82f6]/10"
+                        ? "bg-[#3b82f6] text-white shadow-md shadow-[#3b82f6]/10 font-black"
                         : "text-gray-400 hover:text-white hover:bg-[#1a1b24]"
                     }`}
                   >
                     {item.label}
                   </button>
                 ))}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleClearAllDatabases}
-                  className="px-4 py-2 bg-[#1b1313] border border-[#441a1a] text-rose-405 text-rose-400 hover:text-rose-300 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer leading-none"
-                  title="Reseta integralmente todas as respostas reais acumuladas no dispositivo."
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Zerar Coleta de Votos
-                </button>
               </div>
             </div>
 
@@ -1711,7 +2094,8 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                           ] : []),
                           { id: "senate", label: "🏛️ Senador da República", candCount: activePollData.senateScenario.candidates.length },
                           { id: "stateDeputy", label: "⛰️ Deputado Estadual", candCount: activePollData.stateDeputyScenario.candidates.length },
-                          { id: "federalDeputy", label: "✈️ Deputado Federal", candCount: activePollData.federalDeputyScenario.candidates.length }
+                          { id: "federalDeputy", label: "✈️ Deputado Federal", candCount: activePollData.federalDeputyScenario.candidates.length },
+                          { id: "mayor", label: "🏙️ Prefeito de Petrópolis", candCount: activePollData.mayorScenario?.candidates.length || 0 }
                         ];
 
                         return scenarioOptions.map((scen) => (
@@ -1754,7 +2138,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                         </div>
                       </div>
                       <p className="text-[10px] text-gray-500 mt-2 leading-relaxed">
-                        *Votos válidos baseiam-se em critérios estatísticos consolidados, extraindo-se brancos, nulos e indecisos das intenções de voto.
+                        *Votos válidos baseiam-se em critérios amostrais consolidados, extraindo-se brancos, nulos e indecisos das intenções de voto.
                       </p>
                     </div>
                   </div>
@@ -1776,6 +2160,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                 activeScenario === "governorRunoff" ? "Governo do Estado (2º Turno)" : 
                                 activeScenario === "senate" ? "Senado" :
                                 activeScenario === "stateDeputy" ? "Deputado Estadual" :
+                                activeScenario === "mayor" ? "Prefeito de Petrópolis" :
                                 "Deputado Federal"
                               }
                             </h3>
@@ -1798,6 +2183,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                           activeScenario === "governorRunoff" ? (valuationViewType === "valids" ? govRunoffValids : [...(activePollData.governorRunoff?.candidates || [])].sort((a,b)=>b.votes-a.votes)) :
                           activeScenario === "senate" ? (valuationViewType === "valids" ? senValids : [...activePollData.senateScenario.candidates].sort((a,b)=>b.votes-a.votes)) :
                           activeScenario === "stateDeputy" ? (valuationViewType === "valids" ? stateValids : [...activePollData.stateDeputyScenario.candidates].sort((a,b)=>b.votes-a.votes)) :
+                          activeScenario === "mayor" ? (valuationViewType === "valids" ? mayorValids : [...(activePollData.mayorScenario?.candidates || [])].sort((a,b)=>b.votes-a.votes)) :
                           (valuationViewType === "valids" ? fedValids : [...activePollData.federalDeputyScenario.candidates].sort((a,b)=>b.votes-a.votes))
                         ).map((cand, idx) => {
                           const percent = cand.votes;
@@ -1846,6 +2232,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                     activeScenario === "governorRunoff" ? (activePollData.governorRunoff?.brancosNulos || 0) :
                                     activeScenario === "senate" ? activePollData.senateScenario.brancosNulos :
                                     activeScenario === "stateDeputy" ? activePollData.stateDeputyScenario.brancosNulos :
+                                    activeScenario === "mayor" ? (activePollData.mayorScenario?.brancosNulos || 0) :
                                     activePollData.federalDeputyScenario.brancosNulos).toFixed(1)}%
                                 </span>
                               </div>
@@ -1862,6 +2249,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                     activeScenario === "governorRunoff" ? (activePollData.governorRunoff?.indecisos || 0) :
                                     activeScenario === "senate" ? activePollData.senateScenario.indecisos :
                                     activeScenario === "stateDeputy" ? activePollData.stateDeputyScenario.indecisos :
+                                    activeScenario === "mayor" ? (activePollData.mayorScenario?.indecisos || 0) :
                                     activePollData.federalDeputyScenario.indecisos).toFixed(1)}%
                                 </span>
                               </div>
@@ -2044,7 +2432,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                       <p className="text-xs text-gray-400">Distribuição quantitativa por gênero, idade e bairros nos dados consolidados.</p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
                       
                       {/* Gender Chart Block */}
                       <div className="bg-[#14151b]/40 border border-[#1f212a] p-5 rounded-xl space-y-4 flex flex-col items-center">
@@ -2130,9 +2518,51 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                         </div>
                       </div>
 
-                      {/* District Top Neighborhoods */}
+                      {/* Amostragem por Distrito */}
                       <div className="bg-[#14151b]/40 border border-[#1f212a] p-5 rounded-xl space-y-4 flex flex-col items-center">
-                        <span className="text-xs font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Topografia de Distritos</span>
+                        <span className="text-xs font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Amostragem por Distrito</span>
+                        
+                        <div className="h-44 w-full flex items-center justify-center relative">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={demographicStats.districts}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={45}
+                                outerRadius={65}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {demographicStats.districts.map((entry, index) => (
+                                  <Cell key={`cell-dist-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <Tooltip contentStyle={{ backgroundColor: "#0e0f14", borderColor: "#1f212a" }} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                            <span className="text-xl font-bold font-mono text-emerald-400">{demographicStats.districts.filter(d => d.value > 0).length}</span>
+                            <span className="text-[9px] text-gray-500 uppercase font-mono tracking-widest font-semibold">Distritos</span>
+                          </div>
+                        </div>
+
+                        <div className="w-full space-y-2 text-xs">
+                          {demographicStats.districts.map((item) => (
+                            <div key={item.name} className="flex justify-between items-center text-xs">
+                              <span className="text-gray-400 flex items-center gap-1.5 max-w-[65%] truncate" title={item.name}>
+                                <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
+                                {item.name.replace("º Distrito: ", "º d. - ")}
+                              </span>
+                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Top Bairros de Apoio */}
+                      <div className="bg-[#14151b]/40 border border-[#1f212a] p-5 rounded-xl space-y-4 flex flex-col items-center">
+                        <span className="text-xs font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Bairros com Mais Votos</span>
                         
                         <div className="h-44 w-full flex items-center justify-center relative">
                           <ResponsiveContainer width="100%" height="100%">
@@ -2154,24 +2584,176 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                             </PieChart>
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-                            <span className="text-lg font-bold font-mono text-[#3b82f6]">LINKON</span>
-                            <span className="text-[8px] text-gray-400 uppercase font-mono tracking-widest font-semibold">Pesquisas</span>
+                            <span className="text-lg font-bold font-mono text-[#3b82f6]">BAIRROS</span>
+                            <span className="text-[8px] text-gray-400 uppercase font-mono tracking-widest font-semibold">Ranking</span>
                           </div>
                         </div>
 
                         <div className="w-full space-y-2 text-xs">
                           {demographicStats.neighborhood.slice(0, 4).map((item) => (
                             <div key={item.name} className="flex justify-between items-center text-xs">
-                              <span className="text-gray-400 flex items-center gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: item.color }} />
+                              <span className="text-gray-400 flex items-center gap-1.5 max-w-[65%] truncate" title={item.name}>
+                                <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                 {item.name}
                               </span>
-                              <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
                             </div>
                           ))}
                         </div>
                       </div>
 
+                    </div>
+
+                    {/* Linha adicional para dados amplos (Escolaridade, Renda, Cor, Religião) */}
+                    <div className="border-t border-[#1b1c23] pt-6 mt-6">
+                      <h4 className="text-xs font-mono font-bold text-gray-400 uppercase tracking-widest mb-4">Indicadores Socioeconômicos e Identitários Consolidados</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                        
+                        {/* Escolaridade Chart Block */}
+                        <div className="bg-[#14151b]/40 border border-[#1f212a] p-4 rounded-xl space-y-4 flex flex-col items-center">
+                          <span className="text-[11px] font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Escolaridade</span>
+                          <div className="h-28 w-full flex items-center justify-center relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={demographicStats.education}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={25}
+                                  outerRadius={40}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {demographicStats.education.map((entry, index) => (
+                                    <Cell key={`cell-edu-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: "#0e0f14", borderColor: "#1f212a" }} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="w-full space-y-1.5 text-[10px]">
+                            {demographicStats.education.map((item) => (
+                              <div key={item.name} className="flex justify-between items-center">
+                                <span className="text-gray-400 flex items-center gap-1 max-w-[65%] truncate" title={item.name}>
+                                  <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
+                                  {item.name}
+                                </span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Renda Chart Block */}
+                        <div className="bg-[#14151b]/40 border border-[#1f212a] p-4 rounded-xl space-y-4 flex flex-col items-center">
+                          <span className="text-[11px] font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Faixas de Renda</span>
+                          <div className="h-28 w-full flex items-center justify-center relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={demographicStats.income}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={25}
+                                  outerRadius={40}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {demographicStats.income.map((entry, index) => (
+                                    <Cell key={`cell-inc-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: "#0e0f14", borderColor: "#1f212a" }} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="w-full space-y-1.5 text-[10px]">
+                            {demographicStats.income.map((item) => (
+                              <div key={item.name} className="flex justify-between items-center">
+                                <span className="text-gray-400 flex items-center gap-1 max-w-[65%] truncate" title={item.name}>
+                                  <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
+                                  {item.name}
+                                </span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Cor Chart Block */}
+                        <div className="bg-[#14151b]/40 border border-[#1f212a] p-4 rounded-xl space-y-4 flex flex-col items-center">
+                          <span className="text-[11px] font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Cor / Raça</span>
+                          <div className="h-28 w-full flex items-center justify-center relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={demographicStats.color}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={25}
+                                  outerRadius={40}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {demographicStats.color.map((entry, index) => (
+                                    <Cell key={`cell-col-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: "#0e0f14", borderColor: "#1f212a" }} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="w-full space-y-1.5 text-[10px]">
+                            {demographicStats.color.map((item) => (
+                              <div key={item.name} className="flex justify-between items-center">
+                                <span className="text-gray-400 flex items-center gap-1 max-w-[65%] truncate" title={item.name}>
+                                  <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
+                                  {item.name}
+                                </span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Religião Chart Block */}
+                        <div className="bg-[#14151b]/40 border border-[#1f212a] p-4 rounded-xl space-y-4 flex flex-col items-center">
+                          <span className="text-[11px] font-bold text-white font-display border-b border-gray-800 pb-2 w-full text-center uppercase tracking-wider">Religião</span>
+                          <div className="h-28 w-full flex items-center justify-center relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={demographicStats.religion}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={25}
+                                  outerRadius={40}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {demographicStats.religion.map((entry, index) => (
+                                    <Cell key={`cell-rel-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: "#0e0f14", borderColor: "#1f212a" }} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="w-full space-y-1.5 text-[10px]">
+                            {demographicStats.religion.map((item) => (
+                              <div key={item.name} className="flex justify-between items-center">
+                                <span className="text-gray-400 flex items-center gap-1 max-w-[65%] truncate" title={item.name}>
+                                  <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
+                                  {item.name}
+                                </span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                      </div>
                     </div>
 
                   </div>
@@ -2213,7 +2795,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     </div>
 
                     <p className="text-[10px] text-gray-500 text-center">
-                      *O boletim reconstrói em tempo real todas as porcentagens de votos válidos e totais de acordo com as respostas reais da Linkon Pesquisas.
+                      *O boletim reconstrói em tempo real todas as porcentagens de votos válidos e totais de acordo com as respostas reais da Sondagem Eleitoral Linkon.
                     </p>
 
                   </div>
@@ -2238,16 +2820,16 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="space-y-1.5 text-center md:text-left">
             <h4 className="text-sm font-bold font-display uppercase text-white tracking-wide">
-              Instituto <span className="text-[#3b82f6]">Linkon</span> Pesquisas
+              Instituto <span className="text-[#3b82f6]">Linkon</span> - Sondagem Eleitoral
             </h4>
             <p className="text-xs text-gray-500 max-w-sm">
-              Sistemas de opinião pública voluntária amadora orientados pela lei de sigilo e LGPD. Sem registro no órgão de justiça eleitoral (TRE).
+              Sistemas de opinião pública voluntária amadora orientados pela lei de sigilo e LGPD. Em conformidade com a Resolução nº 23.600 do TSE.
             </p>
           </div>
 
           <div className="flex flex-col items-center md:items-end gap-2 text-[10px] font-mono text-gray-500">
-            <span>Pesquisa de Opinião Amadora (Sem Registro) • Petrópolis, RJ</span>
-            <span>© 2026 Instituto Linkon Pesquisas — Fins de Estudo / Opinião.</span>
+            <span>Sondagem de Opinião Amadora (Sem Registro) • Petrópolis, RJ</span>
+            <span>© 2026 Instituto Linkon — Fins de Estudo / Opinião.</span>
           </div>
         </div>
       </footer>
@@ -2271,7 +2853,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
             </div>
 
             <p className="text-xs text-gray-400 leading-relaxed text-left font-sans">
-              Você está prestes a apagar <b>todos os depoimentos e coletas acumuladas</b> no ciclo corrente das pesquisas do Instituto Linkon. O painel de simulação voltará ao estado original.
+              Você está prestes a apagar <b>todos os depoimentos e coletas acumuladas</b> no ciclo corrente das sondagens do Instituto Linkon. O painel de simulação voltará ao estado original.
             </p>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">

@@ -25,7 +25,7 @@ export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashb
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-xl font-bold font-display text-white">Pesquisa Concluída!</h3>
+        <h3 className="text-xl font-bold font-display text-white">Sondagem Concluída!</h3>
         <p className="text-xs text-gray-400 leading-relaxed max-w-md mx-auto">
           Seu formulário individual foi anonimizado e integrado instantaneamente à amostra geral do <b className="text-white">Petrópolis-RJ</b>. Os percentuais já foram recalculados.
         </p>
@@ -50,6 +50,13 @@ export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashb
             <span className="text-emerald-400 font-mono font-bold bg-[#0f2118] border border-emerald-500/25 px-2 py-0.5 rounded animate-pulse">
               {nextCycleStart}
             </span>
+          </div>
+        </div>
+
+        <div className="border-[#10221c] bg-[#0c1813] border p-3 rounded-xl text-emerald-400 text-[10px] sm:text-xs leading-relaxed flex items-start gap-2 text-left">
+          <span className="text-sm">📅</span>
+          <div>
+            <b>Reparticipação Autorizada:</b> Você poderá opinar e responder novamente uma nova amostragem neste dispositivo a partir de <b className="text-white bg-emerald-500/20 px-1.5 py-0.5 rounded font-mono font-black border border-emerald-500/30">{nextCycleStart}</b>.
           </div>
         </div>
 

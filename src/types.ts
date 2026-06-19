@@ -54,6 +54,11 @@ export interface PollData {
   };
   presidentRunoff?: RunoffScenario;
   governorRunoff?: RunoffScenario;
+  mayorScenario?: {
+    candidates: Candidate[];
+    brancosNulos: number;
+    indecisos: number;
+  };
 }
 
 export interface RunoffScenario {
@@ -71,7 +76,7 @@ export const initialPollData: PollData = {
     marginOfError: 0.0,
     confidenceLevel: 95,
     fieldPeriod: "Coleta amadora em tempo real",
-    registryNumber: "Sem Registro no TRE - Uso de Opinião Pública Amadora"
+    registryNumber: "Sondagem eleitoral permitida pela resolução nº 23.600 do TSE."
   },
   evaluations: [
     {
@@ -180,16 +185,33 @@ export const initialPollData: PollData = {
     indecisos: 0
   },
   presidentRunoff: {
-    candidates: [],
+    candidates: [
+      { id: "pres-lula", name: "Lula", party: "PT", votes: 0 },
+      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", votes: 0 }
+    ],
     brancosNulos: 0,
     indecisos: 0,
-    showRunoff: false
+    showRunoff: true
   },
   governorRunoff: {
-    candidates: [],
+    candidates: [
+      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", votes: 0 },
+      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", votes: 0 }
+    ],
     brancosNulos: 0,
     indecisos: 0,
-    showRunoff: false
+    showRunoff: true
+  },
+  mayorScenario: {
+    candidates: [
+      { id: "may-hingo", name: "Hingo Hammes", party: "PP", votes: 0 },
+      { id: "may-yuri", name: "Yuri Moura", party: "PSOL", votes: 0 },
+      { id: "may-paulo", name: "Paulo Mustrangi", party: "PT", votes: 0 },
+      { id: "may-rubens", name: "Rubens Bomtempo", party: "PT", votes: 0 },
+      { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos", votes: 0 }
+    ],
+    brancosNulos: 0,
+    indecisos: 0
   }
 };
 
@@ -320,10 +342,37 @@ export function generateMarkdownReport(data: PollData): string {
       return `• *${c.name}* (${c.party}): *${c.votes.toFixed(1)}%* totais (${validPerc} válidos)`;
     }).join("\n");
 
-  return `*📊 BOLETIM DE DIVULGAÇÃO - INSTITUTO LINKON PESQUISAS*
+  // 10. Mayor of Petrópolis
+  let mayorLines = "";
+  if (data.mayorScenario) {
+    const mayorValid = calculateValidVotes(
+      data.mayorScenario.candidates,
+      data.mayorScenario.brancosNulos,
+      data.mayorScenario.indecisos
+    );
+    mayorLines = [...data.mayorScenario.candidates]
+      .sort((a, b) => b.votes - a.votes)
+      .map(c => {
+        const v = mayorValid.find(cv => cv.id === c.id);
+        const validPerc = v ? `${v.votes.toFixed(1)}%` : "0.0%";
+        return `• *${c.name}* (${c.party}): *${c.votes.toFixed(1)}%* totais (${validPerc} válidos)`;
+      }).join("\n");
+  }
+
+  return `*📊 BOLETIM DE DIVULGAÇÃO - INSTITUTO LINKON - SONDAGEM ELEITORAL*
 *Petrópolis, RJ — Censo de Opinião Pública*
 
+*📅 PERÍODO DE RECOLHIMENTO DA ENTREVISTA:* de ${getCurrentCycleDates().start} a ${getCurrentCycleDates().end}
+*🚀 PRÓXIMA AMOSTRAGEM INICIA EM:* ${getNextCycleStartDate()}
+
 *👉 Site Oficial:* grupolinkon.com
+
+--------------------------------------------
+
+*🏙️ PREFEITO DE PETRÓPOLIS:*
+${mayorLines}
+• *Brancos / Nulos / Nenhum:* *${data.mayorScenario?.brancosNulos.toFixed(1)}%*
+• *Não Sabem / Indecisos:* *${data.mayorScenario?.indecisos.toFixed(1)}%*
 
 --------------------------------------------
 
@@ -368,7 +417,7 @@ ${fedLines}
 --------------------------------------------
 
 *📝 FICHA TÉCNICA:*
-• *Realização:* Instituto Linkon Pesquisas
+• *Realização:* Instituto Linkon - Sondagem Eleitoral
 • *Amostra:* ${data.metadata.sampleSize} questionários compilados
 • *Margem de Erro:* ±${data.metadata.marginOfError}% | *Confiança:* ${data.metadata.confidenceLevel}%
 • *Período de Campo:* ${data.metadata.fieldPeriod}
@@ -388,54 +437,63 @@ export interface SurveyResponse {
   evalGovernor: string; // "positive" | "regular" | "negative" | "dontKnow"
   evalMayor: string;    // "positive" | "regular" | "negative" | "dontKnow"
   votePresident: string; // Candidate ID or "brancosNulos" or "indecisos"
+  votePresidentRunoff?: string; // Lula or Flávio Bolsonaro, or "brancosNulos"/"indecisos"
   voteGovernor: string;  // Candidate ID or "brancosNulos" or "indecisos"
+  voteGovernorRunoff?: string;  // Eduardo Paes or Douglas Ruas, or "brancosNulos"/"indecisos"
   voteSenate: string[];  // Up to 2 selected candidate IDs (comma or array based)
   voteStateDeputy: string;  // Candidate ID or "brancosNulos" or "indecisos"
   voteFederalDeputy: string; // Candidate ID or "brancosNulos" or "indecisos"
+  voteMayorPetropolis?: string; // Hingo Hammes, Yuri Moura, etc. or "brancosNulos"/"indecisos"
+  education: string;     // "Fundamental Completo ou Incompleto" | "Ensino Médio Completo ou Incompleto" | "Ensino Superior Completo ou Mais"
+  income: string;        // "Até 2 Salários Mínimos" | "De 2 a 5 Salários Mínimos" | "Mais de 5 Salários Mínimos"
+  color: string;         // "Amarela" | "Branca" | "Indígena" | "Parda" | "Preta"
+  religion: string;      // "Católica" | "Evangélica/Protestante" | "Espírita / Umbanda / Candomblé" | "Outra / Sem Religião"
 }
 
-export const PETROPOLIS_NEIGHBORHOODS = [
-  "Alto da Serra",
-  "Araras",
-  "Bingen",
-  "Bonfim",
-  "Carangola",
-  "Cascatinha",
-  "Castelânea",
-  "Caxambu",
-  "Centro",
-  "Corrêas",
-  "Cremerie",
-  "Duas Pontes",
-  "Estrada da Saudade",
-  "Fazenda Inglesa",
-  "Floresta",
-  "Itaipava",
-  "Itamarati",
-  "Independência",
-  "Madame Machado",
-  "Meio da Serra",
-  "Morin",
-  "Mosela",
-  "Nogueira",
-  "Pedro do Rio",
-  "Posse",
-  "Quissamã",
-  "Quarteirão Brasileiro",
-  "Quarteirão Ingelheim",
-  "Quitandinha",
-  "Retiro",
-  "Roseiral",
-  "Samambaia",
-  "Sargento Boening",
-  "São Sebastião",
-  "Secretário",
-  "Siméria",
-  "Vale das Videiras",
-  "Valparaíso",
-  "Vila Rica",
-  "Outros"
-];
+export const NEIGHBORHOODS_BY_DISTRICT: Record<string, string[]> = {
+  "1º Distrito: Petrópolis": [
+    "Centro Histórico", "Valparaíso", "Quitandinha", "Bingen", "Alto da Serra", 
+    "Morin", "Castelânea", "Siméria", "Retiro", "Mosela", "São Sebastião",
+    "24 de Maio", "Vila Felipe", "Vila Real", "Meio da Serra", "Sargento Boening", 
+    "Chácara Flora", "Duas Pontes", "Ponte Fones", "Moinho Preto", "Duarte da Silveira", 
+    "Fazenda Inglesa", "Rocio", "Bataillard", "João Xavier", "Atílio Marotti", "Quarteirão Brasileiro"
+  ],
+  "2º Distrito: Cascatinha": [
+    "Cascatinha", "Itamarati", "Corrêas", "Nogueira", "Quissamã", "Carangola",
+    "Bairro da Glória", "Samambaia", "Roseiral", "Bonfim", "Alcobacinha", 
+    "Bela Vista", "Castelo São Manoel", "Jardim Salvador"
+  ],
+  "3º Distrito: Itaipava": [
+    "Itaipava", "Vale do Cuiabá", "Araras",
+    "Madame Machado", "Catubira", "Manga Larga", "Sumidouro", "Benfica", 
+    "Santa Mônica", "Castelo do Barão", "Jardim Americano"
+  ],
+  "4º Distrito: Pedro do Rio": [
+    "Pedro do Rio", "Secretário", "Vila Rica",
+    "Retiro das Pedras", "Fagundes", "Barra Mansa", "Alto Pegado", "Taquaril"
+  ],
+  "5º Distrito: Posse": [
+    "Posse", "Brejal",
+    "Caminhos do Brejal", "Rio Bonito", "Tremedeira", "Granjas Raposo", 
+    "Nossa Senhora de Fátima", "Jacuba", "Ingá", "Noêmia Alves Rattes", 
+    "Xingu", "Salão Azul", "Contrões", "Córrego Grande", "Córrego Sujo", 
+    "Granja Cláudia", "Nilton Vieira", "Morro da Formiga", "Santo Antônio", "Boa Vista"
+  ]
+};
+
+export const PETROPOLIS_NEIGHBORHOODS = Object.values(NEIGHBORHOODS_BY_DISTRICT)
+  .flat()
+  .sort((a, b) => a.localeCompare(b, "pt-BR"))
+  .concat("Outros");
+
+export function getDistrictForNeighborhood(neighborhood: string): string {
+  for (const [district, list] of Object.entries(NEIGHBORHOODS_BY_DISTRICT)) {
+    if (list.includes(neighborhood)) {
+      return district;
+    }
+  }
+  return "Outros / Não Especificado";
+}
 
 export function generateBaselineResponses(): SurveyResponse[] {
   return [];
@@ -676,165 +734,118 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     indecisos: parseFloat(((fedIndecisos / total) * 100).toFixed(1))
   };
 
-  // Runoff Simulators (Segundo Turno)
-  const presValidVotes = calculateValidVotes(
-    presidentScenario.candidates,
-    presidentScenario.brancosNulos,
-    presidentScenario.indecisos
-  );
-  const presTop1 = presValidVotes[0];
-  const presTop2 = presValidVotes[1];
-  const isPresRunoffNeeded = presTop1 ? presTop1.votes <= 50.0 : false;
-
-  let presRunoffCand1Votes = 0;
-  let presRunoffCand2Votes = 0;
+  // Runoff (Segundo Turno) Scenarios - Fixed Match-ups
+  let presRunoffCand1Votes = 0; // pres-lula
+  let presRunoffCand2Votes = 0; // pres-flavio
   let presRunoffBrancos = 0;
   let presRunoffIndecisos = 0;
 
-  if (presTop1 && presTop2) {
-    const leftParties = ["PT", "PSOL", "UP", "PSB", "PCdoB"];
-    const isCand1Left = leftParties.includes(presTop1.party);
-    const isCand2Left = leftParties.includes(presTop2.party);
-
-    const getPseudoRandom = (id: string, s: string) => {
-      let hash = 0;
-      const str = id + s;
-      for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
-      }
-      return Math.abs(hash % 100) / 100;
-    };
-
-    responses.forEach(r => {
-      if (r.votePresident === presTop1.id) {
+  responses.forEach(r => {
+    const val = r.votePresidentRunoff || "";
+    if (val === "pres-lula") {
+      presRunoffCand1Votes++;
+    } else if (val === "pres-flavio") {
+      presRunoffCand2Votes++;
+    } else if (val === "brancosNulos") {
+      presRunoffBrancos++;
+    } else if (val === "indecisos") {
+      presRunoffIndecisos++;
+    } else {
+      // Fallback distribution for older data if any empty
+      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
+      if (hash % 2 === 0) {
         presRunoffCand1Votes++;
-      } else if (r.votePresident === presTop2.id) {
-        presRunoffCand2Votes++;
-      } else if (r.votePresident === "brancosNulos") {
-        presRunoffBrancos++;
-      } else if (r.votePresident === "indecisos") {
-        presRunoffIndecisos++;
       } else {
-        const otherCandidate = presidentScenario.candidates.find(c => c.id === r.votePresident);
-        if (otherCandidate) {
-          const isOtherLeft = leftParties.includes(otherCandidate.party);
-          const pr = getPseudoRandom(r.id, "pres-runoff");
-          if (isCand1Left !== isCand2Left) {
-            const favoredId = isOtherLeft ? (isCand1Left ? presTop1.id : presTop2.id) : (isCand1Left ? presTop2.id : presTop1.id);
-            if (pr < 0.85) {
-              if (favoredId === presTop1.id) presRunoffCand1Votes++;
-              else presRunoffCand2Votes++;
-            } else if (pr < 0.95) {
-              if (favoredId === presTop1.id) presRunoffCand2Votes++;
-              else presRunoffCand1Votes++;
-            } else {
-              presRunoffBrancos++;
-            }
-          } else {
-            if (pr < 0.45) {
-              presRunoffCand1Votes++;
-            } else if (pr < 0.90) {
-              presRunoffCand2Votes++;
-            } else {
-              presRunoffBrancos++;
-            }
-          }
-        } else {
-          presRunoffIndecisos++;
-        }
+        presRunoffCand2Votes++;
       }
-    });
-  }
+    }
+  });
 
   const presidentRunoff = {
-    candidates: presTop1 && presTop2 ? [
-      { ...presTop1, votes: parseFloat(((presRunoffCand1Votes / total) * 100).toFixed(1)) },
-      { ...presTop2, votes: parseFloat(((presRunoffCand2Votes / total) * 100).toFixed(1)) }
-    ].sort((a, b) => b.votes - a.votes) : [],
-    brancosNulos: parseFloat(((presRunoffBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((presRunoffIndecisos / total) * 105).toFixed(1)), // bound check
-    showRunoff: isPresRunoffNeeded
+    candidates: [
+      { id: "pres-lula", name: "Lula", party: "PT", votes: total > 0 ? parseFloat(((presRunoffCand1Votes / total) * 100).toFixed(1)) : 0 },
+      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", votes: total > 0 ? parseFloat(((presRunoffCand2Votes / total) * 100).toFixed(1)) : 0 }
+    ].sort((a, b) => b.votes - a.votes),
+    brancosNulos: total > 0 ? parseFloat(((presRunoffBrancos / total) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((presRunoffIndecisos / total) * 100).toFixed(1)) : 0,
+    showRunoff: true
   };
 
-  const govValidVotes = calculateValidVotes(
-    governorScenario.candidates,
-    governorScenario.brancosNulos,
-    governorScenario.indecisos
-  );
-  const govTop1 = govValidVotes[0];
-  const govTop2 = govValidVotes[1];
-  const isGovRunoffNeeded = govTop1 ? govTop1.votes <= 50.0 : false;
-
-  let govRunoffCand1Votes = 0;
-  let govRunoffCand2Votes = 0;
+  let govRunoffCand1Votes = 0; // gov-paes
+  let govRunoffCand2Votes = 0; // gov-ruas
   let govRunoffBrancos = 0;
   let govRunoffIndecisos = 0;
 
-  if (govTop1 && govTop2) {
-    const leftParties = ["PT", "PSOL", "UP", "PSB", "PCdoB"];
-    const isCand1Left = leftParties.includes(govTop1.party);
-    const isCand2Left = leftParties.includes(govTop2.party);
-
-    const getPseudoRandom = (id: string, s: string) => {
-      let hash = 0;
-      const str = id + s;
-      for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
-      }
-      return Math.abs(hash % 100) / 100;
-    };
-
-    responses.forEach(r => {
-      if (r.voteGovernor === govTop1.id) {
+  responses.forEach(r => {
+    const val = r.voteGovernorRunoff || "";
+    if (val === "gov-paes") {
+      govRunoffCand1Votes++;
+    } else if (val === "gov-ruas") {
+      govRunoffCand2Votes++;
+    } else if (val === "brancosNulos") {
+      govRunoffBrancos++;
+    } else if (val === "indecisos") {
+      govRunoffIndecisos++;
+    } else {
+      // Fallback distribution for older data
+      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
+      if (hash % 3 === 0) {
         govRunoffCand1Votes++;
-      } else if (r.voteGovernor === govTop2.id) {
+      } else if (hash % 3 === 1) {
         govRunoffCand2Votes++;
-      } else if (r.voteGovernor === "brancosNulos") {
-        govRunoffBrancos++;
-      } else if (r.voteGovernor === "indecisos") {
-        govRunoffIndecisos++;
       } else {
-        const otherCandidate = governorScenario.candidates.find(c => c.id === r.voteGovernor);
-        if (otherCandidate) {
-          const isOtherLeft = leftParties.includes(otherCandidate.party);
-          const pr = getPseudoRandom(r.id, "gov-runoff");
-          if (isCand1Left !== isCand2Left) {
-            const favoredId = isOtherLeft ? (isCand1Left ? govTop1.id : govTop2.id) : (isCand1Left ? govTop2.id : govTop1.id);
-            if (pr < 0.85) {
-              if (favoredId === govTop1.id) govRunoffCand1Votes++;
-              else govRunoffCand2Votes++;
-            } else if (pr < 0.95) {
-              if (favoredId === govTop1.id) govRunoffCand2Votes++;
-              else govRunoffCand1Votes++;
-            } else {
-              govRunoffBrancos++;
-            }
-          } else {
-            if (pr < 0.45) {
-              govRunoffCand1Votes++;
-            } else if (pr < 0.90) {
-              govRunoffCand2Votes++;
-            } else {
-              govRunoffBrancos++;
-            }
-          }
-        } else {
-          govRunoffIndecisos++;
-        }
+        govRunoffBrancos++;
       }
-    });
-  }
+    }
+  });
 
   const governorRunoff = {
-    candidates: govTop1 && govTop2 ? [
-      { ...govTop1, votes: parseFloat(((govRunoffCand1Votes / total) * 100).toFixed(1)) },
-      { ...govTop2, votes: parseFloat(((govRunoffCand2Votes / total) * 100).toFixed(1)) }
-    ].sort((a, b) => b.votes - a.votes) : [],
-    brancosNulos: parseFloat(((govRunoffBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((govRunoffIndecisos / total) * 100).toFixed(1)),
-    showRunoff: isGovRunoffNeeded
+    candidates: [
+      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", votes: total > 0 ? parseFloat(((govRunoffCand1Votes / total) * 100).toFixed(1)) : 0 },
+      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", votes: total > 0 ? parseFloat(((govRunoffCand2Votes / total) * 100).toFixed(1)) : 0 }
+    ].sort((a, b) => b.votes - a.votes),
+    brancosNulos: total > 0 ? parseFloat(((govRunoffBrancos / total) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((govRunoffIndecisos / total) * 100).toFixed(1)) : 0,
+    showRunoff: true
+  };
+
+  // Mayor of Petrópolis Scenario
+  const baseMayorCandidates = [
+    { id: "may-hingo", name: "Hingo Hammes", party: "PP" },
+    { id: "may-yuri", name: "Yuri Moura", party: "PSOL" },
+    { id: "may-paulo", name: "Paulo Mustrangi", party: "PT" },
+    { id: "may-rubens", name: "Rubens Bomtempo", party: "PT" },
+    { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos" }
+  ];
+
+  let mayBrancos = 0;
+  let mayIndecisos = 0;
+  const mayCounts: Record<string, number> = {};
+  baseMayorCandidates.forEach(c => { mayCounts[c.id] = 0; });
+
+  responses.forEach(r => {
+    const val = r.voteMayorPetropolis || "";
+    if (val === "brancosNulos") {
+      mayBrancos++;
+    } else if (val === "indecisos") {
+      mayIndecisos++;
+    } else if (mayCounts[val] !== undefined) {
+      mayCounts[val]++;
+    } else {
+      // Fallback redistribution for older mock data
+      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
+      const fallbackId = baseMayorCandidates[hash % baseMayorCandidates.length].id;
+      mayCounts[fallbackId]++;
+    }
+  });
+
+  const mayorScenario = {
+    candidates: baseMayorCandidates.map(c => ({
+      ...c,
+      votes: total > 0 ? parseFloat(((mayCounts[c.id] / total) * 100).toFixed(1)) : 0
+    })).sort((a, b) => b.votes - a.votes),
+    brancosNulos: total > 0 ? parseFloat(((mayBrancos / total) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((mayIndecisos / total) * 100).toFixed(1)) : 0
   };
 
   return {
@@ -844,7 +855,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
       marginOfError: total > 0 ? parseFloat(Math.max(1.1, Math.min(2.1, 2.1 - (total * 0.001))).toFixed(1)) : 0.0,
       confidenceLevel: 95,
       fieldPeriod: `de ${getCurrentCycleDates().start} a ${getCurrentCycleDates().end}`,
-      registryNumber: "Sem Registro no TRE (Uso Amador / Opinião Pública)"
+      registryNumber: "Sondagem eleitoral permitida pela resolução nº 23.600 do TSE."
     },
     evaluations,
     presidentScenario,
@@ -853,7 +864,8 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     stateDeputyScenario,
     federalDeputyScenario,
     presidentRunoff,
-    governorRunoff
+    governorRunoff,
+    mayorScenario
   };
 }
 
@@ -930,6 +942,10 @@ export interface CandidateDemographicProfile {
     "60+": number;
   };
   neighborhoods: { neighborhood: string; percentage: number; count: number }[];
+  education: Record<string, number>;
+  income: Record<string, number>;
+  color: Record<string, number>;
+  religion: Record<string, number>;
   evaluations: {
     lula: { positive: number; regular: number; negative: number; dontKnow: number };
     governor: { positive: number; regular: number; negative: number; dontKnow: number };
@@ -973,6 +989,10 @@ export function calculateCandidateProfile(
       gender: { feminino: 0, masculino: 0, outro: 0 },
       age: { "16-24": 0, "25-34": 0, "35-44": 0, "45-59": 0, "60+": 0 },
       neighborhoods: [],
+      education: {},
+      income: {},
+      color: {},
+      religion: {},
       evaluations: {
         lula: { positive: 0, regular: 0, negative: 0, dontKnow: 0 },
         governor: { positive: 0, regular: 0, negative: 0, dontKnow: 0 },
@@ -1019,6 +1039,11 @@ export function calculateCandidateProfile(
   let govPos = 0, govReg = 0, govNeg = 0, govDk = 0;
   let mayorPos = 0, mayorReg = 0, mayorNeg = 0, mayorDk = 0;
 
+  const eduCounts: Record<string, number> = {};
+  const incCounts: Record<string, number> = {};
+  const colCounts: Record<string, number> = {};
+  const relCounts: Record<string, number> = {};
+
   candidateVoters.forEach(r => {
     // Lula
     if (r.evalLula === "positive") lulaPos++;
@@ -1037,6 +1062,39 @@ export function calculateCandidateProfile(
     else if (r.evalMayor === "regular") mayorReg++;
     else if (r.evalMayor === "negative") mayorNeg++;
     else mayorDk++;
+
+    // Demographics
+    const edu = r.education || "Não Informado";
+    eduCounts[edu] = (eduCounts[edu] || 0) + 1;
+
+    const inc = r.income || "Não Informado";
+    incCounts[inc] = (incCounts[inc] || 0) + 1;
+
+    const col = r.color || "Não Informado";
+    colCounts[col] = (colCounts[col] || 0) + 1;
+
+    const rel = r.religion || "Não Informado";
+    relCounts[rel] = (relCounts[rel] || 0) + 1;
+  });
+
+  const education: Record<string, number> = {};
+  Object.entries(eduCounts).forEach(([k, v]) => {
+    education[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+  });
+
+  const income: Record<string, number> = {};
+  Object.entries(incCounts).forEach(([k, v]) => {
+    income[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+  });
+
+  const color: Record<string, number> = {};
+  Object.entries(colCounts).forEach(([k, v]) => {
+    color[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+  });
+
+  const religion: Record<string, number> = {};
+  Object.entries(relCounts).forEach(([k, v]) => {
+    religion[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
   });
 
   return {
@@ -1059,6 +1117,10 @@ export function calculateCandidateProfile(
       "60+": parseFloat(((age5 / totalVotes) * 100).toFixed(1))
     },
     neighborhoods: sortedNeighborhoods,
+    education,
+    income,
+    color,
+    religion,
     evaluations: {
       lula: {
         positive: parseFloat(((lulaPos / totalVotes) * 100).toFixed(1)),

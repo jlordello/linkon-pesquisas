@@ -6,11 +6,18 @@ interface ReviewStepProps {
   gender: string;
   age: string;
   neighborhood: string;
+  education: string;
+  income: string;
+  color: string;
+  religion: string;
   votePresidentName: string;
+  votePresidentRunoffName: string;
   voteGovernorName: string;
+  voteGovernorRunoffName: string;
   voteSenateNames: string;
   voteStateDeputyName: string;
   voteFederalDeputyName: string;
+  voteMayorPetropolisName: string;
   onPrev: () => void;
   onSubmit: () => void;
 }
@@ -19,11 +26,18 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   gender,
   age,
   neighborhood,
+  education,
+  income,
+  color,
+  religion,
   votePresidentName,
+  votePresidentRunoffName,
   voteGovernorName,
+  voteGovernorRunoffName,
   voteSenateNames,
   voteStateDeputyName,
   voteFederalDeputyName,
+  voteMayorPetropolisName,
   onPrev,
   onSubmit,
 }) => {
@@ -41,19 +55,38 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
       </div>
 
       <div className="bg-[#14151b] rounded-xl border border-[#1f212a] p-4 text-xs space-y-3.5 divide-y divide-[#1f212a]">
-        <div className="flex justify-between items-center pb-2">
-          <span className="text-gray-400">Perfil Amostral:</span>
-          <span className="font-bold text-white font-mono">{gender}, {age} anos ({neighborhood})</span>
+        <div className="space-y-2 pb-2">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-400 font-semibold uppercase tracking-wider text-[10px]">Perfil Amostral:</span>
+            <span className="font-bold text-[#3b82f6] font-mono">{gender}, {age} anos</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono bg-[#0e0f14]/80 p-2.5 rounded-lg border border-[#1b1c28]">
+            <div>📍 <span className="font-semibold text-gray-300">Bairro:</span> {neighborhood}</div>
+            <div>🎓 <span className="font-semibold text-gray-300">Escolaridade:</span> {education}</div>
+            <div>💰 <span className="font-semibold text-gray-300">Renda:</span> {income}</div>
+            <div>🎨 <span className="font-semibold text-gray-300">Raça:</span> {color}</div>
+            <div className="col-span-2">⛪ <span className="font-semibold text-gray-300">Religião:</span> {religion}</div>
+          </div>
         </div>
 
         <div className="flex justify-between items-start pt-3 pb-2 gap-4">
-          <span className="text-gray-400 shrink-0">Presidente:</span>
+          <span className="text-gray-400 shrink-0">Presidente (1º Turno):</span>
           <span className="font-bold text-[#3b82f6] text-right">{votePresidentName}</span>
         </div>
 
         <div className="flex justify-between items-start pt-3 pb-2 gap-4">
-          <span className="text-gray-400 shrink-0">Governador:</span>
+          <span className="text-gray-400 shrink-0">Presidente (2º Turno - Simulação):</span>
+          <span className="font-bold text-amber-400 text-right">{votePresidentRunoffName}</span>
+        </div>
+
+        <div className="flex justify-between items-start pt-3 pb-2 gap-4">
+          <span className="text-gray-400 shrink-0">Governador (1º Turno):</span>
           <span className="font-bold text-white text-right">{voteGovernorName}</span>
+        </div>
+
+        <div className="flex justify-between items-start pt-3 pb-2 gap-4">
+          <span className="text-gray-400 shrink-0">Governador (2º Turno - Simulação):</span>
+          <span className="font-bold text-amber-400 text-right">{voteGovernorRunoffName}</span>
         </div>
 
         <div className="flex justify-between items-start pt-3 pb-2 gap-4">
@@ -66,9 +99,14 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           <span className="font-bold text-gray-300 text-right">{voteStateDeputyName}</span>
         </div>
 
-        <div className="flex justify-between items-start pt-3 gap-4">
+        <div className="flex justify-between items-start pt-3 pb-2 gap-4">
           <span className="text-gray-400 shrink-0">Deputado Federal:</span>
           <span className="font-bold text-gray-300 text-right">{voteFederalDeputyName}</span>
+        </div>
+
+        <div className="flex justify-between items-start pt-3 pb-2 gap-4">
+          <span className="text-gray-400 shrink-0">Prefeito de Petrópolis:</span>
+          <span className="font-bold text-[#60a5fa] text-right">{voteMayorPetropolisName}</span>
         </div>
       </div>
 
@@ -82,7 +120,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           className="accent-[#3b82f6] h-4 w-4 rounded border-gray-300 mt-0.5" 
         />
         <label htmlFor="lgpd-chk" className="text-[10px] text-gray-400 leading-relaxed cursor-pointer">
-          Consentimento LGPD Ativo: Entendo que minhas escolhas são integralmente computadas na semente numérica estadual de forma anonimizada e agregada pelo Instituto Linkon Pesquisas.
+          Consentimento LGPD Ativo: Entendo que minhas escolhas são integralmente computadas na semente numérica estadual de forma anonimizada e agregada pelo Instituto Linkon.
         </label>
       </div>
 

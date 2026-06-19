@@ -44,10 +44,21 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
   const [distance, setDistance] = useState<number | null>(null);
   const [showBypass, setShowBypass] = useState<boolean>(false);
 
+  React.useEffect(() => {
+    if (status !== "initial") {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      document.documentElement.scrollTo({ top: 0, behavior: "instant" });
+      document.body.scrollTo({ top: 0, behavior: "instant" });
+    }
+  }, [status]);
+
   const requestLocation = () => {
     setStatus("checking");
     setErrorMessage("");
     setDistance(null);
+    window.scrollTo({ top: 0, behavior: "instant" });
+    document.documentElement.scrollTo({ top: 0, behavior: "instant" });
+    document.body.scrollTo({ top: 0, behavior: "instant" });
 
     if (!navigator.geolocation) {
       setErrorMessage("Seu navegador não suporta geolocalização por satélite.");
@@ -121,17 +132,33 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-xl font-bold font-display text-white">Instituto Linkon Pesquisas</h3>
-            <p className="text-xs text-xs font-bold font-mono text-[#3b82f6] tracking-wider uppercase">
+            <h3 className="text-xl font-bold font-display text-white">Instituto Linkon - Sondagem Eleitoral</h3>
+            <p className="text-xs font-bold font-mono text-[#3b82f6] tracking-wider uppercase">
               Verificação Obrigatória de Geolocalização
             </p>
             <p className="text-xs text-gray-400 leading-relaxed max-w-lg mx-auto">
-              Para atender aos critérios de integridade estatística, esta pesquisa de amostragem eleitoral é restrita e auditável. Apenas cidadãos localizados fisicamente em <b className="text-white">Petrópolis, RJ</b> estão aptos a responder. 
+              Para atender aos critérios de integridade amostral, esta sondagem eleitoral é restrita e auditável. Apenas cidadãos localizados fisicamente em <b className="text-white">Petrópolis, RJ</b> estão aptos a responder. 
               <br />
               <span className="text-emerald-400 font-medium block mt-1">
-                ⚠️ Importante: Os dados desta pesquisa são atualizados e consolidados a cada 15 (quinze) dias. O início da próxima amostragem será em {getNextCycleStartDate()}.
+                ⚠️ Importante: Os dados desta sondagem eleitoral são atualizados e consolidados a cada 15 (quinze) dias. O início da próxima sondagem será em {getNextCycleStartDate()}.
               </span>
             </p>
+          </div>
+
+          {/* TSE Regulation Warning Panel */}
+          <div className="bg-[#121420]/80 border border-yellow-500/25 rounded-2xl p-4.5 max-w-md mx-auto text-left space-y-3 shadow-xl">
+            <div className="flex gap-2.5 items-start">
+              <span className="text-lg shrink-0 mt-0.5">⚖️</span>
+              <div className="space-y-1">
+                <h4 className="text-[11px] font-bold text-white uppercase tracking-wider font-mono">Conformidade Legal TSE</h4>
+                <p className="text-[10px] text-gray-300 leading-relaxed">
+                  Informamos que esta plataforma está em total conformidade com a <b>Resolução nº 23.600 do TSE</b>.
+                </p>
+              </div>
+            </div>
+            <div className="border-t border-[#1d1f2e] pt-2.5 text-[10px] text-gray-400 font-sans leading-normal bg-[#0a0c12]/30 p-2.5 rounded-lg">
+              <b>Nota Legal:</b> "Este é um projeto de automação de dados e inteligência artificial. Os dados coletados não possuem valor estatístico científico e não serão divulgados publicamente como pesquisa eleitoral."
+            </div>
           </div>
 
           <div className="bg-[#0e1017] border border-[#1d1f2e] rounded-xl p-4 max-w-md mx-auto text-left space-y-2">
@@ -239,7 +266,7 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-lg font-black text-white">Pesquisa Bloqueada</h3>
+            <h3 className="text-lg font-black text-white">Sondagem Bloqueada</h3>
             <p className="text-xs text-red-400 font-mono font-bold leading-none uppercase">
               Localidade não confirmada ou inválida
             </p>
@@ -247,9 +274,39 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
               {errorMessage} 
               <br />
               <span className="text-[11px] block mt-2 text-gray-500">
-                Esta pesquisa faz parte de amostragem restrita aos limites de Petrópolis e arredores (máx. {MAX_ALLOWED_DISTANCE_KM} km do centro).
+                Esta sondagem eleitoral faz parte de amostragem restrita aos limites de Petrópolis e arredores (máx. {MAX_ALLOWED_DISTANCE_KM} km do centro).
               </span>
             </p>
+          </div>
+
+          {/* Tutorial Step-by-step how to activate location */}
+          <div className="bg-[#121420]/80 border border-[#212330] rounded-2xl p-4.5 max-w-md mx-auto text-left space-y-4 shadow-xl">
+            <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5 border-b border-[#212330] pb-2">
+              <span>📍</span> Como Ativar a Localização no seu Dispositivo:
+            </h4>
+            
+            <div className="space-y-3.5 text-xs text-gray-300">
+              <div className="space-y-1">
+                <span className="font-bold text-[#3b82f6] block">🤖 Celulares Android (Chrome):</span>
+                <p className="text-gray-400 leading-normal pl-3 border-l-2 border-[#3b82f6]/30">
+                  Toque no ícone de <b>cadeado ou configurações</b> à esquerda do endereço do site (canto superior esquerdo) ➡️ selecione <b>Permissões</b> ➡️ ative a permissão de <b>Localização</b> e atualize a página.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="font-bold text-amber-400 block">🍎 iPhone / iPad (Safari):</span>
+                <p className="text-gray-400 leading-normal pl-3 border-l-2 border-amber-400/30">
+                  Abra os <b>Ajustes</b> do iOS ➡️ vá em <b>Privacidade e Segurança</b> ➡️ <b>Serviços de Localização</b> (certifique-se de que está ativado) ➡️ role até encontrar <b>"Safari"</b> e marque para permitir <b>"Durante o Uso do App"</b>. Depois retorne e recarregue a página.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <span className="font-bold text-purple-400 block">💻 Computador / Notebook:</span>
+                <p className="text-gray-400 leading-normal pl-3 border-l-2 border-purple-400/30">
+                  Clique no ícone de <b>cadeado</b> na barra de navegação superior (ao lado de linkon_survey...) ➡️ marque <b>"Permitir"</b> ao lado de <b>Localização</b> ➡️ aperte <b>F5</b> para recarregar.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="pt-4 flex flex-col gap-2.5 max-w-xs mx-auto">
@@ -258,21 +315,12 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
               className="w-full px-5 py-2.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Navigation className="h-4 w-4" />
-              Tentar Novamente
+              Permitir e Tentar Novamente
             </button>
-
-            {showBypass && (
-              <button
-                onClick={handleSimulateBypass}
-                className="w-full px-5 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 text-xs font-bold rounded-xl transition-all cursor-pointer block"
-              >
-                Simular Coleta em Petrópolis (Testes / Homologação)
-              </button>
-            )}
 
             <button
               onClick={() => setStatus("initial")}
-              className="text-[10px] text-gray-500 hover:text-gray-400 font-mono uppercase font-bold text-center mt-2"
+              className="text-[10px] text-gray-500 hover:text-gray-400 font-mono uppercase font-bold text-center mt-2 cursor-pointer"
             >
               Voltar ao Início
             </button>
