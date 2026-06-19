@@ -1,0 +1,35 @@
+name: Deploy para a VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pegar o codigo do Github
+        uses: actions/checkout@v4
+
+      - name: Instalar o Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias e gerar Build de Producao
+        run: |
+          npm install
+          npm run build
+
+      - name: Enviar os arquivos compilados para a VPS via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: "163.176.41.99"
+          username: "ubuntu"
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          source: "dist/*"
+          target: "/var/www/pesquisa"
+          strip_components: 1
