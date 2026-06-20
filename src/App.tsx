@@ -47,7 +47,9 @@ import {
   getActiveQuestions,
   saveActiveQuestions,
   CandidateConfig,
-  QuestionConfig
+  QuestionConfig,
+  getDeviceFingerprint,
+  getCycleKeyForTimestamp
 } from "./types";
 
 // Modular Survey Steps
@@ -70,6 +72,8 @@ export default function App() {
   const [standaloneSuggestions, setStandaloneSuggestions] = useState<{ id: string; timestamp: string; suggestedCandidate: string }[]>([]);
   const [activeView, setActiveView] = useState<"interviewee" | "analyst">("interviewee");
   const [alreadyVoted, setAlreadyVoted] = useState<boolean>(false);
+  const [isPrivateBrowsing, setIsPrivateBrowsing] = useState<boolean>(false);
+  const [deviceHashState, setDeviceHashState] = useState<string>("");
 
   // Survey Wizard Step control
   const [surveyStep, setSurveyStep] = useState<number>(0); 
@@ -328,6 +332,49 @@ export default function App() {
       setAlreadyVoted(submitted);
     }
 
+    const checkSecurityAndFp = async () => {
+      const hash = await getDeviceFingerprint();
+      setDeviceHashState(hash);
+
+      let isPrivate = false;
+      try {
+        if (navigator.storage && navigator.storage.estimate) {
+          const { quota } = await navigator.storage.estimate();
+          if (quota && quota < 120 * 1024 * 1024) {
+            isPrivate = true;
+          }
+        }
+        
+        if ('MozBoxSizing' in document.documentElement.style) {
+          try {
+            const dbRef = indexedDB.open("test_private");
+            dbRef.onerror = () => { isPrivate = true; };
+          } catch (e) {
+            isPrivate = true;
+          }
+        }
+
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        if (isSafari && !navigator.serviceWorker) {
+          isPrivate = true;
+        }
+
+        try {
+          localStorage.setItem("__private_test", "yes");
+          localStorage.removeItem("__private_test");
+        } catch (e) {
+          isPrivate = true;
+        }
+      } catch (err) {
+        console.error("Erro detectando modo privado:", err);
+      }
+
+      if (isPrivate) {
+        setIsPrivateBrowsing(true);
+      }
+      return hash;
+    };
+
     const syncFirestoreData = async () => {
       try {
         // Test connection first as required
@@ -344,6 +391,13 @@ export default function App() {
         querySnapshot.forEach((docSnap) => {
           loaded.push(docSnap.data() as SurveyResponse);
         });
+
+        // Check fingerprint and private mode
+        const hash = await checkSecurityAndFp();
+        const hasVoted = loaded.some(r => r.deviceHash === hash && getCycleKeyForTimestamp(r.timestamp) === currentCycle.key);
+        if (hasVoted) {
+          setAlreadyVoted(true);
+        }
 
         if (loaded.length > 0) {
           setResponses(loaded);
@@ -771,7 +825,8 @@ export default function App() {
     const finalResponse: SurveyResponse = {
       ...surveyAnswers,
       id: `li-res-usr-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      deviceHash: deviceHashState || (await getDeviceFingerprint())
     };
 
     const updated = [...responses, finalResponse];
@@ -914,7 +969,7 @@ export default function App() {
     const reportText = generateMarkdownReport(activePollData);
     navigator.clipboard.writeText(reportText).then(() => {
       setCompactReportCopied(true);
-      showNotification("Relatório analítico de divulgação copiado para a área de transferência!", "success");
+      showNotification("Boletim de divulgação para WhatsApp copiado!", "success");
       setTimeout(() => setCompactReportCopied(false), 2500);
     });
   };
@@ -1132,7 +1187,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
           <div className="text-sm text-gray-400 leading-relaxed text-justify space-y-3 bg-[#08090c] p-4 rounded-xl border border-[#171822]">
             <p>
-              Por questões de <b>integridade estatística, confiabilidade e segurança metodológica</b>, o Instituto Linkon não permite o preenchimento de questionários em navegadores no modo anônimo ou de navegação privada.
+              Por questões de <b>integridade estatística, confiabilidade e segurança metodológica</b>, o Instituto Linkon não permite o preenchimento por entrevistados em navegadores no modo anônimo ou de navegação privada.
             </p>
             <p>
               Nosso sistema utiliza criptografia de tokens e identificadores locais por ciclo de 15 dias (via armazenamento seguro local) para impedir duplicidades, auto-registro massivo ou manipulação externa da amostragem eleitoral em Petrópolis.
@@ -2710,7 +2765,30 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         
         {activeView === "interviewee" ? (
-          alreadyVoted && surveyStep !== (4 + activeQuestions.length) ? (
+          isPrivateBrowsing && surveyStep !== (4 + activeQuestions.length) ? (
+            <div className="max-w-md mx-auto bg-[#0e0f14] border border-amber-500/30 p-8 rounded-2xl text-center space-y-6 animate-fadeIn my-12 shadow-lg shadow-amber-500/5">
+              <div className="mx-auto w-16 h-16 bg-amber-500/15 border border-amber-500/40 rounded-full flex items-center justify-center">
+                <AlertTriangle className="h-8 w-8 text-amber-500" />
+              </div>
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold font-display text-white">Navegação Privada Ativa</h3>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Para garantir a integridade metodológica das amostragens e evitar votos duplicados, votos através de <strong>guias anônimas ou modo privado</strong> não são permitidos nesta plataforma.
+                </p>
+                <div className="bg-[#1b1411] border border-amber-900/30 rounded-xl p-4 text-left space-y-1">
+                  <span className="text-[9px] text-amber-400 font-mono font-bold tracking-wider uppercase block">Medida de Proteção Antifraude</span>
+                  <p className="text-xs text-gray-300 leading-relaxed">Por favor, feche esta guia e abra a plataforma em uma janela de navegação normal no seu navegador para que possa participar.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveView("analyst")}
+                className="w-full px-5 py-2.5 bg-[#1c1e27] hover:bg-[#252834] border border-[#2d303f] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <BarChart4 className="h-4 w-4" />
+                Examinar Painel de Resultados
+              </button>
+            </div>
+          ) : alreadyVoted && surveyStep !== (4 + activeQuestions.length) ? (
             <div className="max-w-md mx-auto bg-[#0e0f14] border border-[#1f212a] p-8 rounded-2xl text-center space-y-6 animate-fadeIn my-12">
               <div className="mx-auto w-16 h-16 bg-blue-500/10 border border-blue-500/30 rounded-full flex items-center justify-center">
                 <Check className="h-8 w-8 text-[#3b82f6]" />
@@ -3034,7 +3112,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   { id: "approvals", label: "📈 Avaliação" },
                   { id: "demographics", label: "👥 Perfil Demográfico" },
                   { id: "evolution", label: "📈 Histórico & Evolução" },
-                  { id: "report", label: "📄 Relatório Imprensas" }
+                  { id: "report", label: "📄 Boletim para WhatsApp" }
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -3152,7 +3230,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                             </span>
                           </div>
                           <p className="text-xs text-gray-400 leading-relaxed">
-                            Contagem instantânea ponderada de todos os <b className="text-white">{responses.length} questionários</b> ativos.
+                            Contagem instantânea ponderada de todos os <b className="text-white">{responses.length} entrevistados</b> ativos.
                           </p>
                         </div>
                       </div>

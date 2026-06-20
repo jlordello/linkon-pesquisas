@@ -282,7 +282,7 @@ Dados consolidados quinzenalmente.
           <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
             <h5 className="text-[11px] font-bold text-blue-400 uppercase tracking-widest font-mono">1. Período de 15 Dias</h5>
             <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
-              As coletas de campo e entrevistas ficam sob vigência por exatos 15 days. Todos os questionários respondidos na região de Petrópolis acumulam-se e compõem a amostragem real e ativa do ciclo corrente.
+              As coletas de campo e entrevistas ficam sob vigência por exatos 15 days. Todos os entrevistados na região de Petrópolis acumulam-se e compõem a amostragem real e ativa do ciclo corrente.
             </p>
           </div>
 

@@ -506,8 +506,7 @@ ${fedLines}
 
 *📝 FICHA TÉCNICA:*
 • *Realização:* Instituto Linkon - Sondagem Eleitoral
-• *Amostra:* ${data.metadata.sampleSize} questionários compilados
-• *Margem de Erro:* ±${data.metadata.marginOfError}% | *Confiança:* ${data.metadata.confidenceLevel}%
+• *Amostra:* ${data.metadata.sampleSize} entrevistados${data.metadata.marginOfError <= 5.0 ? `\n• *Margem de Erro:* ±${data.metadata.marginOfError}% | *Confiança:* ${data.metadata.confidenceLevel}%` : ""}
 • *Período de Campo:* ${data.metadata.fieldPeriod}
 • *Observação:* Levantamento de opinião pública voluntária amadora.
 
@@ -537,6 +536,7 @@ export interface SurveyResponse {
   color: string;         // "Amarela" | "Branca" | "Indígena" | "Parda" | "Preta" | "Quilombola"
   religion: string;      // "Católica" | "Evangélica/Protestante" | "Espírita / Umbanda / Candomblé" | "Outra / Sem Religião"
   suggestedCandidate?: string; // Open-text suggestion for next cycle candidate
+  deviceHash?: string;   // Device fingerprint value
 }
 
 export const NEIGHBORHOODS_BY_DISTRICT: Record<string, string[]> = {
@@ -916,6 +916,27 @@ export function getCurrentCycleDates(): CycleDates {
   return { start, end, key };
 }
 
+export function getCycleKeyForTimestamp(timestampStr: string): string {
+  try {
+    const now = new Date(timestampStr);
+    if (isNaN(now.getTime())) return "";
+    const day = now.getDate();
+    const month = now.getMonth() + 1; // 1-indexed
+    const year = now.getFullYear();
+
+    const pad = (n: number) => n.toString().padStart(2, "0");
+
+    let cycleIndex = 1;
+    if (day > 15) {
+      cycleIndex = 2;
+    }
+
+    return `${year}-${pad(month)}-${cycleIndex}`;
+  } catch (e) {
+    return "";
+  }
+}
+
 export function getNextCycleStartDate(): string {
   const now = new Date();
   const day = now.getDate();
@@ -1156,4 +1177,36 @@ export function calculateCandidateProfile(
       }
     }
   };
+}
+
+export async function getDeviceFingerprint(): Promise<string> {
+  const parts = [
+    typeof navigator !== "undefined" ? (navigator.userAgent || "unknown-ua") : "unknown-ua",
+    typeof window !== "undefined" && window.screen ? (window.screen.width || 0) : 0,
+    typeof window !== "undefined" && window.screen ? (window.screen.height || 0) : 0,
+    typeof window !== "undefined" && window.screen ? (window.screen.colorDepth || 0) : 0,
+    typeof Intl !== "undefined" && Intl.DateTimeFormat ? Intl.DateTimeFormat().resolvedOptions().timeZone : "unknown-tz",
+    typeof navigator !== "undefined" ? (navigator.language || (navigator.languages ? navigator.languages.join(",") : "unknown-lang")) : "unknown-lang",
+    typeof navigator !== "undefined" ? (navigator.hardwareConcurrency || 0) : 0
+  ];
+  const inputStr = parts.join("||");
+  
+  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
+    try {
+      const msgUint8 = new TextEncoder().encode(inputStr);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      // Fallback
+    }
+  }
+
+  let hash = 0;
+  for (let i = 0; i < inputStr.length; i++) {
+    const char = inputStr.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return "fp-" + Math.abs(hash).toString(36);
 }
