@@ -60,12 +60,12 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
             <span className="text-gray-400 font-semibold uppercase tracking-wider text-[10px]">Perfil Amostral:</span>
             <span className="font-bold text-[#3b82f6] font-mono">{gender}, {age} anos</span>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono bg-[#0e0f14]/80 p-2.5 rounded-lg border border-[#1b1c28]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono bg-[#0e0f14]/80 p-2.5 rounded-lg border border-[#1b1c28]">
             <div>📍 <span className="font-semibold text-gray-300">Bairro:</span> {neighborhood}</div>
-            <div>🎓 <span className="font-semibold text-gray-300">Escolaridade:</span> {education}</div>
+            <div>🎓 <span className="font-semibold text-gray-350">Escolaridade:</span> {education}</div>
             <div>💰 <span className="font-semibold text-gray-300">Renda:</span> {income}</div>
             <div>🎨 <span className="font-semibold text-gray-300">Raça:</span> {color}</div>
-            <div className="col-span-2">⛪ <span className="font-semibold text-gray-300">Religião:</span> {religion}</div>
+            <div className="col-span-1 sm:col-span-2">⛪ <span className="font-semibold text-gray-350">Religião:</span> {religion}</div>
           </div>
         </div>
 

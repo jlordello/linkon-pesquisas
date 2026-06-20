@@ -6,15 +6,26 @@ import { getCurrentCycleDates, getNextCycleStartDate } from "../types";
 interface SuccessStepProps {
   onRestart: () => void;
   onGoToDashboard: () => void;
+  showGoToDashboard?: boolean;
 }
 
-export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashboard }) => {
+export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashboard, showGoToDashboard = false }) => {
   const currentCycle = getCurrentCycleDates();
   const nextCycleStart = getNextCycleStartDate();
+
+  React.useEffect(() => {
+    const element = document.getElementById("step-success-container");
+    if (element) {
+      setTimeout(() => {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    }
+  }, []);
 
   return (
     <motion.div
       key="step-9"
+      id="step-success-container"
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
@@ -65,15 +76,17 @@ export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashb
         </p>
       </div>
 
-      <div className="pt-2 flex justify-center">
-        <button
-          onClick={onGoToDashboard}
-          className="px-6 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 transition-all font-mono tracking-wide uppercase"
-        >
-          <BarChart4 className="h-4 w-4" />
-          Ver Painel Geral de Votos
-        </button>
-      </div>
+      {showGoToDashboard && (
+        <div className="pt-2 flex justify-center">
+          <button
+            onClick={onGoToDashboard}
+            className="px-6 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 transition-all font-mono tracking-wide uppercase"
+          >
+            <BarChart4 className="h-4 w-4" />
+            Ver Painel Geral de Votos
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 };

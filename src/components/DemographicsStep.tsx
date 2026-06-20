@@ -45,7 +45,8 @@ export const DemographicsStep: React.FC<DemographicsStepProps> = ({
     "Branca",
     "Indígena",
     "Parda",
-    "Preta"
+    "Preta",
+    "Quilombola"
   ];
 
   const religionOptions = [
@@ -105,7 +106,7 @@ export const DemographicsStep: React.FC<DemographicsStepProps> = ({
           {/* Age Column */}
           <div className="space-y-2">
             <label className="text-[11px] text-gray-300 font-semibold font-display">Sua Faixa Etária:</label>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
               {["16-24", "25-34", "35-44", "45-59", "60+"].map((a) => (
                 <button
                   key={a}

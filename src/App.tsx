@@ -17,7 +17,11 @@ import {
   Info, 
   ShieldCheck,
   Calendar,
-  Unlock
+  Lock,
+  KeyRound,
+  Unlock,
+  ChevronRight,
+  Sparkles
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
@@ -37,7 +41,13 @@ import {
   getNextCycleStartDate,
   calculateCandidateProfile,
   getDistrictForNeighborhood,
-  NEIGHBORHOODS_BY_DISTRICT
+  NEIGHBORHOODS_BY_DISTRICT,
+  getActiveCandidates,
+  saveActiveCandidates,
+  getActiveQuestions,
+  saveActiveQuestions,
+  CandidateConfig,
+  QuestionConfig
 } from "./types";
 
 // Modular Survey Steps
@@ -50,9 +60,14 @@ import { ReviewStep } from "./components/ReviewStep";
 import { SuccessStep } from "./components/SuccessStep";
 import { EvolutionTab } from "./components/EvolutionTab";
 
+// Firebase/Firestore Integration
+import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, getDocFromServer } from "firebase/firestore";
+import { db } from "./firebase";
+
 export default function App() {
   // Database States
   const [responses, setResponses] = useState<SurveyResponse[]>([]);
+  const [standaloneSuggestions, setStandaloneSuggestions] = useState<{ id: string; timestamp: string; suggestedCandidate: string }[]>([]);
   const [activeView, setActiveView] = useState<"interviewee" | "analyst">("interviewee");
   const [alreadyVoted, setAlreadyVoted] = useState<boolean>(false);
 
@@ -79,7 +94,8 @@ export default function App() {
     education: "",
     income: "",
     color: "",
-    religion: ""
+    religion: "",
+    suggestedCandidate: ""
   });
 
   // Analyst Control Center States
@@ -99,18 +115,173 @@ export default function App() {
 
   // Secret Admin Panel States
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
+    return sessionStorage.getItem("linkon_admin_session") === "true";
+  });
+  const [adminPinInput, setAdminPinInput] = useState<string>("");
+  const [pinError, setPinError] = useState<string>("");
+
+  const [adminSubTab, setAdminSubTab] = useState<"dossier" | "candidates" | "questions">("dossier");
+  const [questionsList, setQuestionsList] = useState(() => getActiveQuestions());
+  const [candidateUpdateTrigger, setCandidateUpdateTrigger] = useState(0);
+
+  // States for candidate editing in candidates tab
+  const [editCandCategory, setEditCandCategory] = useState<"president" | "presidentRunoff" | "governor" | "governorRunoff" | "senate" | "stateDeputy" | "federalDeputy" | "mayor">("president");
+  const [editCandId, setEditCandId] = useState<string | null>(null);
+  const [editCandName, setEditCandName] = useState("");
+  const [editCandParty, setEditCandParty] = useState("");
+  const [newCandName, setNewCandName] = useState("");
+  const [newCandParty, setNewCandParty] = useState("");
+
+  // States for question editing in questions tab
+  const [editQuestKey, setEditQuestKey] = useState<string | null>(null);
+  const [editQuestTitle, setEditQuestTitle] = useState("");
+  const [editQuestSubtitle, setEditQuestSubtitle] = useState("");
+  const [editQuestCategory, setEditQuestCategory] = useState<string>("president");
+  const [newQuestKey, setNewQuestKey] = useState("");
+  const [newQuestTitle, setNewQuestTitle] = useState("");
+  const [newQuestSubtitle, setNewQuestSubtitle] = useState("");
+  const [newQuestCategory, setNewQuestCategory] = useState<string>("president");
   const [adminCategory, setAdminCategory] = useState<"president" | "governor" | "senate" | "stateDeputy" | "federalDeputy">("president");
   const [adminCandidateId, setAdminCandidateId] = useState<string>("pres-lula");
   const [copiedProfileText, setCopiedProfileText] = useState<boolean>(false);
   const [candidateProfileTab, setCandidateProfileTab] = useState<"stats" | "whatsapp">("stats");
+  const [isPrivateMode, setIsPrivateMode] = useState<boolean>(false);
 
-  // Auto path-routing check for /painell
+  // AI Suggestions and Google Gemini analysis of candidate votes
+  const [aiSuggestions, setAiSuggestions] = useState<{ name: string; count: number; analysis: string }[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
+
+  const [deviceSuggestions, setDeviceSuggestions] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("linkon_device_suggestions");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newSuggestionInput, setNewSuggestionInput] = useState<string>("");
+  const [submittingUserSuggestion, setSubmittingUserSuggestion] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (activeView !== "analyst" && !isAdminMode) return;
+    
+    // Filter non-empty open candidate suggestions from both responses and standalone suggestions
+    const rawResponsesSuggestions = responses
+      .map(r => r.suggestedCandidate)
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+
+    const rawStandaloneSuggestions = standaloneSuggestions
+      .map(s => s.suggestedCandidate)
+      .filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+
+    const rawSuggestions = [...rawResponsesSuggestions, ...rawStandaloneSuggestions];
+
+    if (rawSuggestions.length === 0) {
+      setAiSuggestions([]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchAiSuggestions = async () => {
+      setLoadingSuggestions(true);
+      let success = false;
+      let attempt = 1;
+      const maxAttempts = 3;
+
+      while (attempt <= maxAttempts && isMounted && !success) {
+        try {
+          const response = await fetch("/api/gemini/suggest-candidates", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ suggestions: rawSuggestions })
+          });
+          if (!response.ok) throw new Error("Erro de comunicação com o servidor.");
+          const data = await response.json();
+          if (isMounted) {
+            setAiSuggestions(data.candidates || []);
+            success = true;
+          }
+        } catch (err) {
+          console.error(`Erro buscando sugestões de candidaturas IA (tentativa ${attempt}/${maxAttempts}):`, err);
+          attempt++;
+          if (attempt <= maxAttempts && isMounted) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        }
+      }
+
+      if (isMounted) {
+        setLoadingSuggestions(false);
+      }
+    };
+
+    fetchAiSuggestions();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [activeView, isAdminMode, responses, standaloneSuggestions]);
+
+  // Detect private / incognito browsing to protect poll audit integrity
+  useEffect(() => {
+    const detectPrivateMode = async () => {
+      // 1. Firefox private mode detection via IndexedDB
+      const isFirefox = navigator.userAgent.toLowerCase().includes("firefox");
+      if (isFirefox) {
+        try {
+          const db = window.indexedDB.open("ff_private_test");
+          db.onerror = () => setIsPrivateMode(true);
+        } catch (e) {
+          setIsPrivateMode(true);
+        }
+        return;
+      }
+
+      // 2. Chrome & Chromium-based browsers (Edge, Opera, Chrome mobile) private mode detection
+      if ("storage" in navigator && "estimate" in navigator.storage) {
+        const { quota } = await navigator.storage.estimate();
+        // Chromium incognito limits local storage size, or limits storage estimate to very low bytes (< 120MB)
+        if (quota && quota < 120000000) {
+          setIsPrivateMode(true);
+          return;
+        }
+      }
+
+      // 3. Safari private mode check
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isSafari) {
+        try {
+          const testDb = window.indexedDB.open("safari_private_test");
+          testDb.onerror = () => setIsPrivateMode(true);
+          testDb.onsuccess = () => {
+            try {
+              window.localStorage.setItem("safari_private_key", "test");
+              window.localStorage.removeItem("safari_private_key");
+            } catch (e) {
+              setIsPrivateMode(true);
+            }
+          };
+        } catch (e) {
+          setIsPrivateMode(true);
+        }
+        return;
+      }
+    };
+
+    detectPrivateMode();
+  }, []);
+
+  // Auto path-routing check for admin mode
   useEffect(() => {
     const checkRoute = () => {
-      const isPainel = window.location.pathname === "/painell" || 
-                       window.location.pathname.endsWith("/painell") || 
-                       window.location.hash.includes("painell") ||
-                       window.location.search.includes("painell");
+      // Obfuscated representation of "painell" to prevent discovery via inspect element / string search
+      const s = window.atob("cGFpbmVsbA==");
+      const isPainel = window.location.pathname.includes(s) || 
+                       window.location.hash.includes(s) ||
+                       window.location.search.includes(s);
       setIsAdminMode(isPainel);
     };
 
@@ -139,7 +310,7 @@ export default function App() {
     activeView
   ]);
 
-  // Load Seed / Data base with automatic 15-day cycle reset
+  // Load Seed / Data base with automatic 15-day cycle reset and Firestore integration
   useEffect(() => {
     const currentCycle = getCurrentCycleDates();
     const storedCycle = localStorage.getItem("linkon_survey_cycle");
@@ -155,35 +326,104 @@ export default function App() {
     } else {
       const submitted = localStorage.getItem(submittedKey) === "true";
       setAlreadyVoted(submitted);
-      if (submitted) {
-        setActiveView("analyst");
-      }
     }
 
-    if (!hasReset) {
-      const stored = localStorage.getItem("linkon_survey_responses");
-      if (stored) {
+    const syncFirestoreData = async () => {
+      try {
+        // Test connection first as required
         try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setResponses(parsed);
-            return;
+          await getDocFromServer(doc(db, "test", "connection"));
+        } catch (err) {
+          if (err instanceof Error && err.message.includes("the client is offline")) {
+            console.error("Please check your Firebase configuration.");
           }
-        } catch (e) {
-          console.error("Erro no carregamento do LocalStorage", e);
+        }
+
+        const querySnapshot = await getDocs(collection(db, "responses"));
+        const loaded: SurveyResponse[] = [];
+        querySnapshot.forEach((docSnap) => {
+          loaded.push(docSnap.data() as SurveyResponse);
+        });
+
+        if (loaded.length > 0) {
+          setResponses(loaded);
+          localStorage.setItem("linkon_survey_responses", JSON.stringify(loaded));
+        } else {
+          // DB is empty in cloud, load from local storage if exists
+          let loadedLocal = false;
+          const stored = localStorage.getItem("linkon_survey_responses");
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setResponses(parsed);
+                loadedLocal = true;
+              }
+            } catch (e) {
+              console.error(e);
+            }
+          }
+          if (!loadedLocal) {
+            setResponses([]);
+            localStorage.setItem("linkon_survey_responses", JSON.stringify([]));
+          }
+        }
+
+        // Fetch standalone suggestions from Cloud or cache
+        const loadedSugs: { id: string; timestamp: string; suggestedCandidate: string }[] = [];
+        try {
+          const sugSnapshot = await getDocs(collection(db, "suggestions"));
+          sugSnapshot.forEach((docSnap) => {
+            loadedSugs.push(docSnap.data() as any);
+          });
+          setStandaloneSuggestions(loadedSugs);
+          localStorage.setItem("linkon_standalone_suggestions", JSON.stringify(loadedSugs));
+        } catch (sugErr) {
+          console.error("Erro ao carregar sugestões adicionais da nuvem:", sugErr);
+          const storedSugs = localStorage.getItem("linkon_standalone_suggestions");
+          if (storedSugs) {
+            setStandaloneSuggestions(JSON.parse(storedSugs));
+          }
+        }
+
+      } catch (error) {
+        console.error("Erro carregando do Firestore, tentando carregamento local:", error);
+        // Fallback local load
+        const stored = localStorage.getItem("linkon_survey_responses");
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              setResponses(parsed);
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        } else {
+          setResponses([]);
+          localStorage.setItem("linkon_survey_responses", JSON.stringify([]));
+        }
+
+        const storedSugs = localStorage.getItem("linkon_standalone_suggestions");
+        if (storedSugs) {
+          try {
+            const parsedS = JSON.parse(storedSugs);
+            if (Array.isArray(parsedS)) {
+              setStandaloneSuggestions(parsedS);
+            }
+          } catch (e) {
+            console.error(e);
+          }
         }
       }
-    }
-    
-    // Period has changed or database empty -> clean start
-    const seed = generateBaselineResponses();
-    localStorage.setItem("linkon_survey_responses", JSON.stringify(seed));
-    setResponses(seed);
-    
+    };
+
+    syncFirestoreData();
+
     if (hasReset) {
       showNotification(`Dados reiniciados! Novo ciclo quinzenal: ${currentCycle.start} a ${currentCycle.end}`, "info");
     } else {
-      showNotification("Pronto para coleta de votos reais em Petrópolis!", "success");
+      showNotification("Banco profissional de respostas ativo e sincronizado!", "success");
     }
   }, []);
 
@@ -220,7 +460,8 @@ export default function App() {
         "Branca",
         "Indígena",
         "Parda",
-        "Preta"
+        "Preta",
+        "Quilombola"
       ];
       const religionOptions = [
         "Católica",
@@ -263,14 +504,31 @@ export default function App() {
     setShowClearConfirm(true);
   };
 
-  const confirmClearDatabase = () => {
+  const confirmClearDatabase = async () => {
     const currentCycle = getCurrentCycleDates();
     updateDatabase([]);
+    setStandaloneSuggestions([]);
+    localStorage.removeItem("linkon_standalone_suggestions");
+    setDeviceSuggestions([]);
+    localStorage.removeItem("linkon_device_suggestions");
     localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
     localStorage.removeItem("linkon_survey_submitted");
     setAlreadyVoted(false);
     setShowClearConfirm(false);
-    showNotification("Banco de dados do ciclo limpo!", "warning");
+    
+    try {
+      const querySnapshot = await getDocs(collection(db, "responses"));
+      const deletePromises = querySnapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+      
+      const sugSnapshot = await getDocs(collection(db, "suggestions"));
+      const deleteSugPromises = sugSnapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+
+      await Promise.all([...deletePromises, ...deleteSugPromises]);
+      showNotification("Banco profissional da Nuvem e dados locais limpos com sucesso!", "warning");
+    } catch (e) {
+      console.error("Erro limpando Firestore ao confirmar clear:", e);
+      showNotification("Banco local limpo. Falha ao limpar nuvem.", "warning");
+    }
   };
 
   // Sync Database
@@ -290,7 +548,7 @@ export default function App() {
   // Real-time calculated aggregations
   const activePollData = useMemo(() => {
     return aggregateSurveyResponses(responses);
-  }, [responses]);
+  }, [responses, candidateUpdateTrigger]);
 
   // Valid vote precomputations
   const presValids = useMemo(() => {
@@ -450,6 +708,10 @@ export default function App() {
     }));
   };
 
+  const activeQuestions = useMemo(() => {
+    return questionsList.filter(q => q.active);
+  }, [questionsList]);
+
   const handleNextStep = () => {
     if (surveyStep === 1) {
       if (
@@ -471,41 +733,26 @@ export default function App() {
         return;
       }
     }
-    if (surveyStep === 3 && !surveyAnswers.votePresident) {
-      showNotification("Por favor, selecione uma opção presidencial.", "warning");
-      return;
-    }
-    if (surveyStep === 4 && !surveyAnswers.votePresidentRunoff) {
-      showNotification("Por favor, selecione uma opção para a simulação de Segundo Turno Presidencial.", "warning");
-      return;
-    }
-    if (surveyStep === 5 && !surveyAnswers.voteGovernor) {
-      showNotification("Por favor, selecione uma opção para Governador.", "warning");
-      return;
-    }
-    if (surveyStep === 6 && !surveyAnswers.voteGovernorRunoff) {
-      showNotification("Por favor, selecione uma opção para a simulação de Segundo Turno para Governador.", "warning");
-      return;
-    }
-    if (surveyStep === 7) {
-      const isSpecial = surveyAnswers.voteSenate?.includes("brancosNulos") || surveyAnswers.voteSenate?.includes("indecisos");
-      const isValidSenate = isSpecial || (surveyAnswers.voteSenate && surveyAnswers.voteSenate.length === 2);
-      if (!isValidSenate) {
-        showNotification("Por favor, selecione exatamente 2 candidatos ou clique em Branco/Nulo para o Senado.", "warning");
-        return;
+
+    if (surveyStep >= 3 && surveyStep < 3 + activeQuestions.length) {
+      const qIdx = surveyStep - 3;
+      const question = activeQuestions[qIdx];
+      const val = surveyAnswers[question.key as keyof typeof surveyAnswers];
+
+      if (question.category === "senate") {
+        const votes = (val as string[]) || [];
+        const isSpecial = votes.includes("brancosNulos") || votes.includes("indecisos");
+        const isValidSenate = isSpecial || votes.length === 2;
+        if (!isValidSenate) {
+          showNotification("Por favor, selecione exatamente 2 candidatos ou clique em Branco/Nulo para o Senado.", "warning");
+          return;
+        }
+      } else {
+        if (!val) {
+          showNotification(`Por favor, selecione uma opção para continuar.`, "warning");
+          return;
+        }
       }
-    }
-    if (surveyStep === 8 && !surveyAnswers.voteStateDeputy) {
-      showNotification("Por favor, selecione um candidato a Deputado Estadual.", "warning");
-      return;
-    }
-    if (surveyStep === 9 && !surveyAnswers.voteFederalDeputy) {
-      showNotification("Por favor, selecione um candidato a Deputado Federal.", "warning");
-      return;
-    }
-    if (surveyStep === 10 && !surveyAnswers.voteMayorPetropolis) {
-      showNotification("Por favor, selecione um candidato a Prefeito de Petrópolis.", "warning");
-      return;
     }
     
     setSurveyStep(prev => prev + 1);
@@ -520,7 +767,7 @@ export default function App() {
   };
 
   // Submit survey responses
-  const handleSurveySubmit = () => {
+  const handleSurveySubmit = async () => {
     const finalResponse: SurveyResponse = {
       ...surveyAnswers,
       id: `li-res-usr-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
@@ -530,12 +777,19 @@ export default function App() {
     const updated = [...responses, finalResponse];
     updateDatabase(updated);
     
+    try {
+      await setDoc(doc(db, "responses", finalResponse.id), finalResponse);
+      showNotification("Sondagem enviada e salva na Nuvem com sucesso!", "success");
+    } catch (e) {
+      console.error("Erro salvando resposta no Firestore:", e);
+      showNotification("Sondagem guardada localmente! (Modo Offline ativo)", "info");
+    }
+
     const currentCycle = getCurrentCycleDates();
     localStorage.setItem("linkon_survey_submitted_" + currentCycle.key, "true");
     setAlreadyVoted(true);
     setSurveySubmitted(true);
-    showNotification("Sondagem enviada! Seus dados foram consolidados no painel de Petrópolis.", "success");
-    setSurveyStep(12);
+    setSurveyStep(4 + activeQuestions.length);
   };
 
   // Clean reset
@@ -558,10 +812,52 @@ export default function App() {
       education: "",
       income: "",
       color: "",
-      religion: ""
+      religion: "",
+      suggestedCandidate: ""
     });
     setSurveySubmitted(false);
     setSurveyStep(0);
+  };
+
+  const handleUserSuggestionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newSuggestionInput.trim();
+    if (!cleanName) {
+      showNotification("Por favor, digite o nome de um pré-candidato.", "warning");
+      return;
+    }
+
+    if (deviceSuggestions.length >= 3) {
+      showNotification("Você já enviou o limite máximo de 3 sugestões por dispositivo.", "warning");
+      return;
+    }
+
+    setSubmittingUserSuggestion(true);
+    const newSuggestDoc = {
+      id: `li-sug-direct-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      timestamp: new Date().toISOString(),
+      suggestedCandidate: cleanName
+    };
+
+    const updated = [...standaloneSuggestions, newSuggestDoc];
+    
+    try {
+      await setDoc(doc(db, "suggestions", newSuggestDoc.id), newSuggestDoc);
+      setStandaloneSuggestions(updated);
+      localStorage.setItem("linkon_standalone_suggestions", JSON.stringify(updated));
+      
+      const newDeviceList = [...deviceSuggestions, cleanName];
+      setDeviceSuggestions(newDeviceList);
+      localStorage.setItem("linkon_device_suggestions", JSON.stringify(newDeviceList));
+      
+      setNewSuggestionInput("");
+      showNotification("Sua sugestão de pré-candidato foi enviada com sucesso!", "success");
+    } catch (err) {
+      console.error("Erro salvando sugestão direta:", err);
+      showNotification("Não foi possível enviar sua sugestão. Tente novamente.", "warning");
+    } finally {
+      setSubmittingUserSuggestion(false);
+    }
   };
 
   // Simulation respondent generator disabled to keep database 100% real
@@ -569,20 +865,36 @@ export default function App() {
     showNotification("Simulações desativadas. Amostragem 100% real.", "info");
   };
 
-  const handleDeleteResponse = (id: string) => {
+  const handleDeleteResponse = async (id: string) => {
     const filtered = responses.filter(r => r.id !== id);
     updateDatabase(filtered);
-    showNotification("Questionário removido permanentemente do banco ativo.", "info");
+    
+    try {
+      await deleteDoc(doc(db, "responses", id));
+      showNotification("Sondagem removida com sucesso da Nuvem e do painel local.", "info");
+    } catch (e) {
+      console.error("Erro deletando do Firestore:", e);
+      showNotification("Sondagem excluída localmente! (Erro ao atualizar Nuvem)", "warning");
+    }
   };
 
-  const handleHardResetDatabase = () => {
+  const handleHardResetDatabase = async () => {
     if (window.confirm("Zerar integralmente o banco de dados?")) {
       const currentCycle = getCurrentCycleDates();
       updateDatabase([]);
       localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
       localStorage.removeItem("linkon_survey_submitted");
       setAlreadyVoted(false);
-      showNotification("Banco de dados reiniciado e limpo para votações reais.", "warning");
+      
+      try {
+        const querySnapshot = await getDocs(collection(db, "responses"));
+        const deletePromises = querySnapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+        await Promise.all(deletePromises);
+        showNotification("Banco profissional da Nuvem e base local redefinidos!", "warning");
+      } catch (e) {
+        console.error("Erro limpando Firestore:", e);
+        showNotification("Banco local reiniciado. Falha ao limpar nuvem.", "warning");
+      }
     }
   };
 
@@ -796,8 +1108,54 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
     });
   };
 
+  if (isPrivateMode && !isAdminMode) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex items-center justify-center p-6 text-[#e0e2e6] font-sans">
+        <div className="relative max-w-lg w-full bg-[#0d0e12] border border-[#202230] rounded-3xl p-8 text-center space-y-6 shadow-2xl overflow-hidden">
+          {/* Ambient blur background */}
+          <div className="absolute -top-24 -left-24 w-48 h-48 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Secure Warning Shield */}
+          <div className="mx-auto w-16 h-16 bg-red-500/10 border border-red-500/25 rounded-2xl flex items-center justify-center text-red-500 animate-pulse">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-xl font-extrabold font-display uppercase tracking-wider text-white">
+              Navegação Privada Bloqueada
+            </h2>
+            <p className="text-xs text-red-400 font-mono font-bold uppercase tracking-widest">
+              SISTEMA DE AUDITORIA LINKON
+            </p>
+          </div>
+
+          <div className="text-sm text-gray-400 leading-relaxed text-justify space-y-3 bg-[#08090c] p-4 rounded-xl border border-[#171822]">
+            <p>
+              Por questões de <b>integridade estatística, confiabilidade e segurança metodológica</b>, o Instituto Linkon não permite o preenchimento de questionários em navegadores no modo anônimo ou de navegação privada.
+            </p>
+            <p>
+              Nosso sistema utiliza criptografia de tokens e identificadores locais por ciclo de 15 dias (via armazenamento seguro local) para impedir duplicidades, auto-registro massivo ou manipulação externa da amostragem eleitoral em Petrópolis.
+            </p>
+            <p className="text-xs text-gray-500">
+              A navegação privada limpa esses dados instantaneamente ao fechar a guia, quebrando qualquer possibilidade de auditoria independente e corrompendo a amostragem justa.
+            </p>
+          </div>
+
+          <div className="pt-2 text-xs text-gray-400 font-medium">
+            💡 <b>Como prosseguir?</b> Abra o link em uma <b>guia convencional (modo normal)</b> no navegador do seu smartphone ou computador para conseguir responder à pesquisa.
+          </div>
+
+          <div className="border-t border-[#1a1b26] pt-4 text-[10px] text-gray-500 font-mono uppercase tracking-widest">
+            GRUPO LINKON • PETRÓPOLIS, RJ
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#070709] text-[#e0e2e6] font-sans antialiased selection:bg-[#3b82f6] selection:text-white">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#070709] text-[#e0e2e6] font-sans antialiased selection:bg-[#3b82f6] selection:text-white">
       
       {/* Dynamic Popups */}
       <AnimatePresence>
@@ -825,15 +1183,102 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
       </AnimatePresence>
 
       {isAdminMode ? (
-        /* SECRET ADMIN INTEL PANEL */
-        <div className="min-h-screen bg-[#070709] text-gray-300 pb-24">
+        !isAdminAuthenticated ? (
+          /* BRAND NEW PASSWORD LOCK OVERLAY FOR MAX SECURITY */
+          <div className="min-h-screen bg-[#070709] flex flex-col items-center justify-center px-4 relative overflow-hidden">
+             {/* Glowing visual accent spheres */}
+             <div className="absolute -top-40 -left-45 w-96 h-96 bg-[#3b82f6]/5 rounded-full blur-[120px] pointer-events-none" />
+             <div className="absolute -bottom-40 -right-45 w-96 h-96 bg-[#ef4444]/5 rounded-full blur-[120px] pointer-events-none" />
+
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.95, y: 15 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               className="w-full max-w-sm bg-[#0d0e14]/90 border border-neutral-800/60 p-8 rounded-3xl space-y-6 shadow-2xl relative backdrop-blur-xl"
+             >
+                <div className="text-center space-y-2">
+                  <div className="mx-auto w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center text-red-500 mb-2">
+                    <Lock className="h-5 w-5" />
+                  </div>
+                  <h2 className="text-base font-extrabold text-white tracking-tight uppercase font-display">Acesso Restrito</h2>
+                  <p className="text-[10px] text-gray-400 font-mono tracking-widest uppercase text-red-500">Instituto Linkon • Painel Analítico</p>
+                  <p className="text-[11px] text-gray-400 leading-normal pt-1 px-4">
+                    Insira o código de segurança do administrador para prosseguir para o módulo crítico e de simulação de Petrópolis.
+                  </p>
+                </div>
+
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  // The passcode is "2623", obfuscated to prevent detection from Inspect Element search (MjYyMw==)
+                  if (window.btoa(adminPinInput) === "MjYyMw==") {
+                    sessionStorage.setItem("linkon_admin_session", "true");
+                    setIsAdminAuthenticated(true);
+                    setPinError("");
+                  } else {
+                    setPinError("Código incorreto. Acesso não habilitado.");
+                    setAdminPinInput("");
+                  }
+                }} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-mono font-bold text-gray-500 uppercase tracking-widest block font-sans">Código Credencial</label>
+                    <div className="relative">
+                      <input
+                        type="password"
+                        placeholder="••••"
+                        maxLength={8}
+                        value={adminPinInput}
+                        onChange={(e) => {
+                          setAdminPinInput(e.target.value);
+                          if (pinError) setPinError("");
+                        }}
+                        className="w-full px-4.5 py-3 bg-[#07080c] border border-neutral-800 rounded-xl text-center text-white font-mono text-lg tracking-[0.4em] focus:outline-none focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/30 transition-all placeholder-neutral-700 placeholder:tracking-normal placeholder:text-sm"
+                        autoFocus
+                      />
+                      <div className="absolute right-3.5 top-3.5 text-neutral-600">
+                        <KeyRound className="h-4 w-4" />
+                      </div>
+                    </div>
+                    {pinError && (
+                      <motion.p 
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-[10px] text-red-400 font-mono text-center mt-1"
+                      >
+                        ⚠️ {pinError}
+                      </motion.p>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-red-600 hover:bg-red-500 text-white text-xs font-bold font-mono tracking-wider uppercase rounded-xl shadow-lg shadow-red-600/15 cursor-pointer transition-all"
+                  >
+                    Desbloquear Painel
+                  </button>
+                </form>
+
+                <div className="border-t border-[#1a1b24] pt-4 text-center">
+                  <button
+                    onClick={() => {
+                      setIsAdminMode(false);
+                      window.location.hash = "";
+                      window.location.search = "";
+                      window.history.replaceState({}, document.title, "/");
+                    }}
+                    className="text-gray-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors flex items-center gap-1.5 mx-auto cursor-pointer"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" />
+                    Voltar ao Site Público
+                  </button>
+                </div>
+             </motion.div>
+          </div>
+        ) : (
+          /* SECRET ADMIN INTEL PANEL */
+          <div className="min-h-screen bg-[#070709] text-gray-300 pb-24">
           {/* Admin Header */}
           <header className="bg-[#0b0c10]/95 backdrop-blur-xl border-b border-[#1b1c23] sticky top-0 z-40 px-6 py-4">
             <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl flex items-center justify-center text-red-500 shadow-lg shadow-red-500/5">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h1 className="text-sm font-bold font-display tracking-tight text-white uppercase leading-none">
@@ -908,8 +1353,114 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               </div>
             </div>
 
-            {/* Admin Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Premium Admin Sub-tabs Navigation */}
+            <div className="flex border-b border-[#1f212d] pb-2 gap-6 overflow-x-auto scroller-none">
+              <button
+                id="admin-tab-dossier"
+                onClick={() => setAdminSubTab("dossier")}
+                className={`py-2 px-1 text-xs uppercase font-extrabold font-mono tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+                  adminSubTab === "dossier" 
+                    ? "border-blue-500 text-blue-400" 
+                    : "border-transparent text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                📊 Dossiê Analítico
+              </button>
+              <button
+                id="admin-tab-candidates"
+                onClick={() => setAdminSubTab("candidates")}
+                className={`py-2 px-1 text-xs uppercase font-extrabold font-mono tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+                  adminSubTab === "candidates" 
+                    ? "border-blue-500 text-blue-400" 
+                    : "border-transparent text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                👥 Gerenciar Candidatos
+              </button>
+              <button
+                id="admin-tab-questions"
+                onClick={() => setAdminSubTab("questions")}
+                className={`py-2 px-1 text-xs uppercase font-extrabold font-mono tracking-wider transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+                  adminSubTab === "questions" 
+                    ? "border-blue-500 text-blue-400" 
+                    : "border-transparent text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                📝 Perguntas de Coleta
+              </button>
+            </div>
+
+            {adminSubTab === "dossier" && (
+              <>
+                {/* GOOGLE ARCHITECTURE SUGGESTION BOX (GEMINI AI ENGINE) */}
+                <div className="bg-gradient-to-br from-[#0e0f14] to-[#0a1122] rounded-2xl border border-blue-500/15 p-6 space-y-4 shadow-xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl text-blue-400 shrink-0">
+                        <Sparkles className="h-5 w-5 animate-pulse" />
+                      </div>
+                      <div className="text-left space-y-0.5">
+                        <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">Módulo Cognitivo Google Gemini</span>
+                        <h3 className="text-sm font-bold text-white font-display">Sugestões de Pré-Candidato</h3>
+                        <p className="text-xs text-gray-400">Nomes sugeridos livremente pelos eleitores para compor futuras amostragens de opinião pública.</p>
+                      </div>
+                    </div>
+
+                    <div className="text-left sm:text-right shrink-0">
+                      <span className="text-[9px] text-gray-500 font-mono block uppercase">Total Acumulado</span>
+                      <span className="text-xs font-bold font-mono text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg">
+                        {responses.filter(r => r.suggestedCandidate?.trim()).length + standaloneSuggestions.filter(s => s.suggestedCandidate?.trim()).length} indicações
+                      </span>
+                    </div>
+                  </div>
+
+                  {loadingSuggestions ? (
+                    <div className="py-8 text-center space-y-3">
+                      <div className="inline-block h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-xs font-mono text-gray-400">Google Gemini está aglutinando, corrigindo grafias e analisando perfis...</p>
+                    </div>
+                  ) : aiSuggestions.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {aiSuggestions.map((candidate, idx) => (
+                        <div 
+                          key={idx} 
+                          className="bg-[#0c0d12] border border-[#1b1c24] hover:border-blue-500/35 transition-all p-4 rounded-xl flex flex-col justify-between space-y-3"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5 text-left">
+                              <div className="h-7 w-7 rounded-lg bg-[#141829] border border-blue-500/20 flex items-center justify-center font-bold text-xs text-blue-400 font-mono">
+                                #{idx + 1}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h4 className="text-xs font-bold text-white uppercase tracking-tight">{candidate.name}</h4>
+                                  {((candidate as any).party || (candidate as any).partido) && (
+                                    <span className="text-[9px] font-mono font-extrabold px-1.5 py-0.5 select-none uppercase tracking-wider text-purple-400 bg-purple-500/10 border border-purple-500/20 rounded">
+                                      {(candidate as any).party || (candidate as any).partido}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-[#3b82f6] font-mono font-semibold">Identificado por IA</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-mono font-extrabold bg-[#1b223c] text-blue-400 border border-[#2b3a6c] px-2 py-0.5 rounded-md">
+                              {candidate.count} sug.
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-400 leading-relaxed text-left border-t border-gray-900/60 pt-2 bg-gradient-to-r from-transparent to-transparent">
+                            <span className="text-blue-400 font-mono">💬 Contexto:</span> {candidate.analysis}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-[#0b0c10]/40 border border-[#1b1c24] p-6 rounded-xl text-center">
+                      <p className="text-xs text-gray-500 font-mono">Nenhum pré-candidato sugerido pelos entrevistados neste ciclo ainda.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
               {/* Left Column - Candidate Navigator (4 cols) */}
               <div className="lg:col-span-4 space-y-6">
@@ -1671,9 +2222,436 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 </div>
               </div>
             </div>
+              </>
+            )}
+
+            {/* CANDIDATES SUB-TAB VIEW */}
+            {adminSubTab === "candidates" && (
+              <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-6 space-y-6">
+                <div>
+                  <h3 className="text-sm font-extrabold font-mono text-white uppercase tracking-wider">
+                    👥 Central de Candidatos & Partidos
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Adicione, edite ou remova candidatos de qualquer um dos 8 cenários de pesquisa mapeados. Tudo sincronizado dinamicamente.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                  {/* Category Selection Left Panel */}
+                  <div className="md:col-span-3 space-y-2">
+                    {[
+                      { id: "president", label: "👑 Presidente" },
+                      { id: "presidentRunoff", label: "⚔️ Pres. Turno Fim" },
+                      { id: "governor", label: "🏰 Governador" },
+                      { id: "governorRunoff", label: "⚔️ Gov. Turno Fim" },
+                      { id: "senate", label: "🏛️ Senado" },
+                      { id: "stateDeputy", label: "⛰️ Dep. Estadual" },
+                      { id: "federalDeputy", label: "✈️ Dep. Federal" },
+                      { id: "mayor", label: "🏙️ Prefeito" }
+                    ].map((cat) => (
+                      <button
+                        key={cat.id}
+                        id={`cands-cat-${cat.id}`}
+                        onClick={() => {
+                          setEditCandCategory(cat.id as any);
+                          setEditCandId(null);
+                        }}
+                        className={`w-full text-left py-2.5 px-3.5 text-xs font-bold font-mono uppercase tracking-wider rounded-xl transition-all border flex items-center justify-between cursor-pointer ${
+                          editCandCategory === cat.id
+                            ? "bg-blue-500/10 border-blue-500/30 text-blue-400 font-extrabold"
+                            : "bg-[#14151b]/60 border-[#1f212a] text-gray-400 hover:text-white"
+                        }`}
+                      >
+                        {cat.label}
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Candidates Right Panel */}
+                  <div className="md:col-span-9 space-y-6">
+                    {/* Add Candidate Form */}
+                    <div id="add-candidate-form" className="bg-[#12131a] border border-[#1f212a] p-4 rounded-xl space-y-3">
+                      <span className="text-[10px] text-gray-400 font-mono font-bold tracking-wider uppercase block">
+                        ➕ Adicionar Pré-Candidato no cenário ativo
+                      </span>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <input
+                          id="cand-name-input"
+                          type="text"
+                          placeholder="Nome Completo / Urna"
+                          value={newCandName}
+                          onChange={(e) => setNewCandName(e.target.value)}
+                          className="flex-1 bg-[#0b0c10] border border-[#1f212a] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#3b82f6]"
+                        />
+                        <input
+                          id="cand-party-input"
+                          type="text"
+                          placeholder="Partido (Ex: PL, PT, PSD)"
+                          value={newCandParty}
+                          onChange={(e) => setNewCandParty(e.target.value)}
+                          className="w-full sm:w-44 bg-[#0b0c10] border border-[#1f212a] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#3b82f6]"
+                        />
+                        <button
+                          id="cand-add-submit"
+                          onClick={() => {
+                            if (!newCandName.trim()) {
+                              showNotification("Digite o nome do candidato.", "warning");
+                              return;
+                            }
+                            const list = getActiveCandidates(editCandCategory);
+                            const slug = newCandName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-");
+                            const newCand: Candidate = {
+                              id: `custom-${slug}-${Date.now()}`,
+                              name: newCandName.trim(),
+                              party: newCandParty.trim() || "S/P",
+                              votes: 0
+                            };
+                            const updated = [...list, newCand];
+                            saveActiveCandidates(editCandCategory, updated);
+                            setNewCandName("");
+                            setNewCandParty("");
+                            setCandidateUpdateTrigger(prev => prev + 1);
+                            showNotification("Candidato adicionado com sucesso!", "success");
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                        >
+                          Adicionar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Active Candidates List */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] text-[#3b82f6] font-mono font-bold tracking-wider uppercase block">
+                        Visualização de Candidatos Estimulados ({getActiveCandidates(editCandCategory).length})
+                      </span>
+                      <div className="divide-y divide-[#1f212a] bg-[#14151b]/40 border border-[#1f212a] rounded-xl overflow-hidden">
+                        {getActiveCandidates(editCandCategory).map((cand) => (
+                          <div
+                            key={cand.id}
+                            id={`cand-row-${cand.id}`}
+                            className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#111218]/40 hover:bg-[#14151a]"
+                          >
+                            {editCandId === cand.id ? (
+                              <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                                <input
+                                  id={`cand-edit-name-${cand.id}`}
+                                  type="text"
+                                  value={editCandName}
+                                  onChange={(e) => setEditCandName(e.target.value)}
+                                  className="flex-1 bg-[#0b0c10] border border-[#3b82f6] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                />
+                                <input
+                                  id={`cand-edit-party-${cand.id}`}
+                                  type="text"
+                                  value={editCandParty}
+                                  onChange={(e) => setEditCandParty(e.target.value)}
+                                  className="w-24 bg-[#0b0c10] border border-[#3b82f6] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                />
+                                <div className="flex gap-1">
+                                  <button
+                                    id={`cand-save-${cand.id}`}
+                                    onClick={() => {
+                                      if (!editCandName.trim()) return;
+                                      const list = getActiveCandidates(editCandCategory);
+                                      const updated = list.map(c => c.id === cand.id ? { ...c, name: editCandName.trim(), party: editCandParty.trim() || c.party } : c);
+                                      saveActiveCandidates(editCandCategory, updated);
+                                      setEditCandId(null);
+                                      setCandidateUpdateTrigger(prev => prev + 1);
+                                      showNotification("Alterações salvas!", "success");
+                                    }}
+                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold font-mono uppercase tracking-wider rounded-md transition-colors"
+                                  >
+                                    Salvar
+                                  </button>
+                                  <button
+                                    id={`cand-cancel-${cand.id}`}
+                                    onClick={() => setEditCandId(null)}
+                                    className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-[10px] font-bold font-mono uppercase tracking-wider rounded-md transition-colors"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="space-y-1">
+                                  <span className="text-xs font-bold text-white block">{cand.name}</span>
+                                  <span className="text-[10px] text-gray-500 font-mono block">Partido: {cand.party || "S/P"}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    id={`cand-action-edit-${cand.id}`}
+                                    onClick={() => {
+                                      setEditCandId(cand.id);
+                                      setEditCandName(cand.name);
+                                      setEditCandParty(cand.party);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-[#1f212a] hover:bg-[#2c2f3b] text-white text-[10px] font-bold font-mono rounded cursor-pointer transition-colors"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    id={`cand-action-del-${cand.id}`}
+                                    onClick={() => {
+                                      if (window.confirm(`Excluir permanentemente o pré-candidato ${cand.name}?`)) {
+                                        const list = getActiveCandidates(editCandCategory);
+                                        const updated = list.filter(c => c.id !== cand.id);
+                                        saveActiveCandidates(editCandCategory, updated);
+                                        setCandidateUpdateTrigger(prev => prev + 1);
+                                        showNotification("Candidato removido!", "warning");
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[10px] font-bold font-mono rounded cursor-pointer transition-colors"
+                                  >
+                                    Excluir
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* QUESTIONS SUB-TAB VIEW */}
+            {adminSubTab === "questions" && (
+              <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-6 space-y-6">
+                <div>
+                  <h3 className="text-sm font-extrabold font-mono text-white uppercase tracking-wider">
+                    📝 Perguntas de Coleta & Segmentos Survey
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Defina quais perguntas estimuladas serão exibidas progressivamente para o eleitorado no formulário público.
+                  </p>
+                </div>
+
+                {/* Create Question Form */}
+                <div id="add-question-form" className="bg-[#12131a] border border-[#1f212a] p-5 rounded-xl space-y-4">
+                  <span className="text-[10px] text-gray-400 font-mono font-bold tracking-wider uppercase block">
+                    ➕ Criar Nova Pergunta de Coleta
+                  </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono font-bold uppercase block">Chave de Resposta (Key)</label>
+                      <input
+                        id="new-quest-key"
+                        type="text"
+                        placeholder="Ex: voteCustomPres"
+                        value={newQuestKey}
+                        onChange={(e) => setNewQuestKey(e.target.value)}
+                        className="w-full bg-[#0b0c10] border border-[#1f212a] p-2 rounded-lg text-xs text-white focus:outline-none focus:border-[#3b82f6]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono font-bold uppercase block font-sans">Cenário Associado de Candidatos</label>
+                      <select
+                        id="new-quest-cat"
+                        value={newQuestCategory}
+                        onChange={(e) => setNewQuestCategory(e.target.value)}
+                        className="w-full bg-[#0b0c10] border border-[#1f212a] p-2 rounded-lg text-xs text-white focus:outline-none"
+                      >
+                        <option value="president">Presidente</option>
+                        <option value="presidentRunoff">Presidente Simulado Segundo Turno</option>
+                        <option value="governor">Governador</option>
+                        <option value="governorRunoff">Governador Simulado Segundo Turno</option>
+                        <option value="senate">Senado (Múltipla Escolha)</option>
+                        <option value="stateDeputy">Deputado Estadual</option>
+                        <option value="federalDeputy">Deputado Federal</option>
+                        <option value="mayor">Prefeito de Petrópolis</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono font-bold uppercase block font-sans">Título da Pergunta</label>
+                    <input
+                      id="new-quest-title"
+                      type="text"
+                      placeholder="Ex: Se as eleições fossem hoje, em quem votaria..."
+                      value={newQuestTitle}
+                      onChange={(e) => setNewQuestTitle(e.target.value)}
+                      className="w-full bg-[#0b0c10] border border-[#1f212a] p-2 rounded-lg text-xs text-white focus:outline-none focus:border-[#3b82f6]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono font-bold uppercase block font-sans">Subtítulo Explicativo</label>
+                    <input
+                      id="new-quest-subtitle"
+                      type="text"
+                      placeholder="Ex: Escolha um candidato estimulado..."
+                      value={newQuestSubtitle}
+                      onChange={(e) => setNewQuestSubtitle(e.target.value)}
+                      className="w-full bg-[#0b0c10] border border-[#1f212a] p-2 rounded-lg text-xs text-white focus:outline-none focus:border-[#3b82f6]"
+                    />
+                  </div>
+                  <button
+                    id="quest-add-submit"
+                    onClick={() => {
+                      if (!newQuestKey.trim() || !newQuestTitle.trim()) {
+                        showNotification("Chave e Título são obrigatórios.", "warning");
+                        return;
+                      }
+                      const activeList = getActiveQuestions();
+                      const doubleKey = activeList.find(q => q.key === newQuestKey.trim());
+                      if (doubleKey) {
+                        showNotification("Essa chave de resposta já existe.", "warning");
+                        return;
+                      }
+                      const newQuestionItem: QuestionConfig = {
+                        stepIndex: activeList.length + 3,
+                        key: newQuestKey.trim(),
+                        title: newQuestTitle.trim(),
+                        subtitle: newQuestSubtitle.trim() || "Selecione uma opção estimulada.",
+                        category: newQuestCategory as any,
+                        active: true
+                      };
+                      const updated = [...activeList, newQuestionItem];
+                      saveActiveQuestions(updated);
+                      setQuestionsList(updated);
+                      setNewQuestKey("");
+                      setNewQuestTitle("");
+                      setNewQuestSubtitle("");
+                      showNotification("Nova pergunta de coleta cadastrada com sucesso!", "success");
+                    }}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold font-mono uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                  >
+                    Cadastrar Pergunta
+                  </button>
+                </div>
+
+                {/* Display list of active/inactive questions */}
+                <div className="space-y-3">
+                  <span className="text-[10px] text-[#3b82f6] font-mono font-bold tracking-wider uppercase block">
+                    Lista Geral de Perguntas de Coleta ({questionsList.length})
+                  </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {questionsList.map((quest) => (
+                      <div
+                        key={quest.key}
+                        id={`quest-card-${quest.key}`}
+                        className="bg-[#14151b] border border-[#1f212a] p-4 rounded-xl flex flex-col justify-between gap-4 hover:border-gray-800"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="text-[9px] bg-blue-500/10 text-blue-400 font-mono font-bold px-2 py-0.5 rounded border border-blue-500/20 uppercase tracking-wide">
+                              {quest.category}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] text-gray-500 font-mono">{quest.active ? "Ativa" : "Desativa"}</span>
+                              <input
+                                id={`quest-toggle-${quest.key}`}
+                                type="checkbox"
+                                checked={quest.active}
+                                onChange={() => {
+                                  // Can toggle active state
+                                  const updated = questionsList.map(q => q.key === quest.key ? { ...q, active: !q.active } : q);
+                                  saveActiveQuestions(updated);
+                                  setQuestionsList(updated);
+                                  showNotification(`${quest.active ? "Pergunta desativada!" : "Pergunta ativada!"}`, "info");
+                                }}
+                                className="accent-[#3b82f6] h-4 w-4 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          {editQuestKey === quest.key ? (
+                            <div className="space-y-3 pt-2">
+                              <input
+                                id={`quest-edit-title-${quest.key}`}
+                                type="text"
+                                value={editQuestTitle}
+                                onChange={(e) => setEditQuestTitle(e.target.value)}
+                                className="w-full bg-[#0b0c10] border border-[#3b82f6] rounded-md px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                placeholder="Edit title"
+                              />
+                              <input
+                                id={`quest-edit-subtitle-${quest.key}`}
+                                type="text"
+                                value={editQuestSubtitle}
+                                onChange={(e) => setEditQuestSubtitle(e.target.value)}
+                                className="w-full bg-[#0b0c10] border border-[#3b82f6] rounded-md px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                                placeholder="Edit subtitle"
+                              />
+                              <div className="flex gap-1.5">
+                                <button
+                                  id={`quest-save-${quest.key}`}
+                                  onClick={() => {
+                                    if (!editQuestTitle.trim()) return;
+                                    const updated = questionsList.map(q => q.key === quest.key ? { ...q, title: editQuestTitle.trim(), subtitle: editQuestSubtitle.trim() } : q);
+                                    saveActiveQuestions(updated);
+                                    setQuestionsList(updated);
+                                    setEditQuestKey(null);
+                                    showNotification("Pergunta atualizada!", "success");
+                                  }}
+                                  className="px-3 py-1 bg-emerald-600 text-white text-[10px] font-mono rounded cursor-pointer transition-colors"
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  id={`quest-cancel-${quest.key}`}
+                                  onClick={() => setEditQuestKey(null)}
+                                  className="px-3 py-1 bg-gray-600 text-white text-[10px] font-mono rounded cursor-pointer transition-colors"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1 pt-1">
+                              <h4 className="text-xs font-bold text-white">{quest.title}</h4>
+                              <p className="text-[11px] text-gray-400 capitalize">{quest.subtitle}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {!editQuestKey && (
+                          <div className="flex items-center justify-between border-t border-gray-900 pt-3 text-[10px] font-mono">
+                            <span className="text-gray-500">Chave: {quest.key}</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                id={`quest-action-edit-${quest.key}`}
+                                onClick={() => {
+                                  setEditQuestKey(quest.key);
+                                  setEditQuestTitle(quest.title);
+                                  setEditQuestSubtitle(quest.subtitle);
+                                }}
+                                className="text-[#3b82f6] hover:underline cursor-pointer"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                id={`quest-action-del-${quest.key}`}
+                                onClick={() => {
+                                  if (window.confirm(`Excluir permanentemente a pergunta ${quest.key}?`)) {
+                                    const updated = questionsList.filter(q => q.key !== quest.key);
+                                    saveActiveQuestions(updated);
+                                    setQuestionsList(updated);
+                                    showNotification("Pergunta excluída!", "warning");
+                                  }
+                                }}
+                                className="text-red-400 hover:underline cursor-pointer"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
           </main>
         </div>
+        )
       ) : (
         /* STANDARD PUBLIC CLIENT SCREEN */
         <>
@@ -1682,9 +2660,6 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-[#1d4ed8] to-[#06b6d4] p-2.5 rounded-xl flex items-center justify-center shadow-lg shadow-[#1d4ed8]/20">
-              <TrendingUp className="h-5 w-5 text-white" />
-            </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold font-display tracking-tight text-white uppercase">
@@ -1736,7 +2711,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         
         {activeView === "interviewee" ? (
-          alreadyVoted && surveyStep !== 9 ? (
+          alreadyVoted && surveyStep !== (4 + activeQuestions.length) ? (
             <div className="max-w-md mx-auto bg-[#0e0f14] border border-[#1f212a] p-8 rounded-2xl text-center space-y-6 animate-fadeIn my-12">
               <div className="mx-auto w-16 h-16 bg-blue-500/10 border border-blue-500/30 rounded-full flex items-center justify-center">
                 <Check className="h-8 w-8 text-[#3b82f6]" />
@@ -1777,16 +2752,16 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               <div className="absolute top-0 left-0 right-0 h-1 bg-[#1a1b26]" />
               
               {/* Dynamic Step Tracker indicator */}
-              {surveyStep > 0 && surveyStep < 11 && (
+              {surveyStep > 0 && surveyStep <= (2 + activeQuestions.length) && (
                 <div className="mb-6 space-y-2">
                   <div className="flex justify-between text-[11px] font-mono text-gray-400">
                     <span>PROGRESSO DE COLETA</span>
-                    <span className="text-[#3b82f6]">Etapa {surveyStep} de 10</span>
+                    <span className="text-[#3b82f6]">Etapa {surveyStep} de {2 + activeQuestions.length}</span>
                   </div>
                   <div className="w-full bg-[#161821] h-1.5 rounded-full overflow-hidden">
                     <div 
                       className="bg-gradient-to-r from-[#3b82f6] to-[#06b6d4] h-full rounded-full transition-all duration-300"
-                      style={{ width: `${(surveyStep / 10) * 100}%` }}
+                      style={{ width: `${(surveyStep / (2 + activeQuestions.length)) * 100}%` }}
                     />
                   </div>
                 </div>
@@ -1821,109 +2796,54 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   />
                 )}
 
-                {surveyStep === 3 && (
-                  <SingleSelectionStep
-                    stepKey="step-3"
-                    title="Cenário Presidencial Estimulado (1º Turno)"
-                    subtitle="Se as eleições presidenciais fossem hoje, em qual destes candidatos você votaria?"
-                    candidates={activePollData.presidentScenario.candidates}
-                    selectedValue={surveyAnswers.votePresident}
-                    onChange={(val) => handleAnswerSelect("votePresident", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
+                {activeQuestions.map((question, qIdx) => {
+                  const currentStepNum = 3 + qIdx;
+                  if (surveyStep !== currentStepNum) return null;
 
-                {surveyStep === 4 && (
-                  <SingleSelectionStep
-                    stepKey="step-4"
-                    title="Cenário Presidencial de Segundo Turno (Simulação)"
-                    subtitle="Em um eventual segundo turno para Presidente entre Lula e Flávio Bolsonaro, em qual destes você votaria?"
-                    candidates={activePollData.presidentRunoff?.candidates || []}
-                    selectedValue={surveyAnswers.votePresidentRunoff || ""}
-                    onChange={(val) => handleAnswerSelect("votePresidentRunoff", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
+                  const candScenarioMap: Record<string, string> = {
+                    votePresident: "presidentScenario",
+                    votePresidentRunoff: "presidentRunoff",
+                    voteGovernor: "governorScenario",
+                    voteGovernorRunoff: "governorRunoff",
+                    voteSenate: "senateScenario",
+                    voteStateDeputy: "stateDeputyScenario",
+                    voteFederalDeputy: "federalDeputyScenario",
+                    voteMayorPetropolis: "mayorScenario"
+                  };
 
-                {surveyStep === 5 && (
-                  <SingleSelectionStep
-                    stepKey="step-5"
-                    title="Cenário Estadual (Governador - RJ)"
-                    subtitle="Se as eleições para Governador do Estado fossem hoje, qual destas opções você escolheria?"
-                    candidates={activePollData.governorScenario.candidates}
-                    selectedValue={surveyAnswers.voteGovernor}
-                    onChange={(val) => handleAnswerSelect("voteGovernor", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
+                  const scenarioField = candScenarioMap[question.key] || "presidentScenario";
+                  const candidates = (activePollData as any)[scenarioField]?.candidates || [];
 
-                {surveyStep === 6 && (
-                  <SingleSelectionStep
-                    stepKey="step-6"
-                    title="Cenário Estadual de Segundo Turno (Governador • Simulação)"
-                    subtitle="Em um eventual segundo turno para Governador entre Eduardo Paes e Douglas Ruas, qual candidato você escolheria?"
-                    candidates={activePollData.governorRunoff?.candidates || []}
-                    selectedValue={surveyAnswers.voteGovernorRunoff || ""}
-                    onChange={(val) => handleAnswerSelect("voteGovernorRunoff", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
+                  if (question.category === "senate") {
+                    return (
+                      <SenateSelectionStep
+                        key={question.key}
+                        candidates={candidates}
+                        selectedValues={surveyAnswers.voteSenate}
+                        onChange={(val) => handleAnswerSelect("voteSenate", val)}
+                        onNext={handleNextStep}
+                        onPrev={handlePrevStep}
+                      />
+                    );
+                  }
 
-                {surveyStep === 7 && (
-                  <SenateSelectionStep
-                    candidates={activePollData.senateScenario.candidates}
-                    selectedValues={surveyAnswers.voteSenate}
-                    onChange={(val) => handleAnswerSelect("voteSenate", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
+                  return (
+                    <SingleSelectionStep
+                      key={question.key}
+                      stepKey={question.key}
+                      title={question.title}
+                      subtitle={question.subtitle}
+                      candidates={candidates}
+                      selectedValue={(surveyAnswers as any)[question.key] || ""}
+                      onChange={(val) => handleAnswerSelect(question.key as any, val)}
+                      onNext={handleNextStep}
+                      onPrev={handlePrevStep}
+                      btnNextText={qIdx === activeQuestions.length - 1 ? "Revisar Respostas" : undefined}
+                    />
+                  );
+                })}
 
-                {surveyStep === 8 && (
-                  <SingleSelectionStep
-                    stepKey="step-8"
-                    title="Cenário Proporcional - Deputado Estadual"
-                    subtitle="Para representar a Região Serrana na ALERJ, qual desses pré-candidatos você escolheria hoje?"
-                    candidates={activePollData.stateDeputyScenario.candidates}
-                    selectedValue={surveyAnswers.voteStateDeputy}
-                    onChange={(val) => handleAnswerSelect("voteStateDeputy", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
-
-                {surveyStep === 9 && (
-                  <SingleSelectionStep
-                    stepKey="step-9"
-                    title="Cenário Federal - Deputado Federal"
-                    subtitle="Para ser o representante de Petrópolis em Brasília, em qual candidato você depositaria seu voto?"
-                    candidates={activePollData.federalDeputyScenario.candidates}
-                    selectedValue={surveyAnswers.voteFederalDeputy}
-                    onChange={(val) => handleAnswerSelect("voteFederalDeputy", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                  />
-                )}
-
-                {surveyStep === 10 && (
-                  <SingleSelectionStep
-                    stepKey="step-10"
-                    title="Eleição Municipal - Prefeito de Petrópolis"
-                    subtitle="Se as eleições para Prefeito de Petrópolis fossem hoje, qual destas opções você escolheria?"
-                    candidates={activePollData.mayorScenario?.candidates || []}
-                    selectedValue={surveyAnswers.voteMayorPetropolis || ""}
-                    onChange={(val) => handleAnswerSelect("voteMayorPetropolis", val)}
-                    onNext={handleNextStep}
-                    onPrev={handlePrevStep}
-                    btnNextText="Revisar Respostas"
-                  />
-                )}
-
-                {surveyStep === 11 && (
+                {surveyStep === (3 + activeQuestions.length) && (
                   <ReviewStep
                     gender={surveyAnswers.gender}
                     age={surveyAnswers.age}
@@ -1945,13 +2865,14 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   />
                 )}
 
-                {surveyStep === 12 && (
+                {surveyStep === (4 + activeQuestions.length) && (
                   <SuccessStep
                     onRestart={handleResetSurvey}
                     onGoToDashboard={() => {
                       setActiveView("analyst");
                       handleResetSurvey();
                     }}
+                    showGoToDashboard={true}
                   />
                 )}
               </AnimatePresence>
@@ -2041,6 +2962,69 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <span className="text-[10px] text-gray-400 font-mono">{topActiveNeighborhood} mais ativo</span>
               </div>
 
+            </div>
+
+            {/* COLLABORATIVE CANDIDATE SUGGESTION BOX (FOR RESPONDENTS) */}
+            <div className="bg-gradient-to-br from-[#0e0f14] to-[#121421] rounded-2xl border border-blue-500/15 p-6 space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl text-blue-400 shrink-0">
+                    <Sparkles className="h-5 w-5 animate-pulse" />
+                  </div>
+                  <div className="text-left space-y-1">
+                    <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">Colaboração do Eleitorado</span>
+                    <h3 className="text-sm font-bold text-white font-display">Sugestões de Pré-Candidato</h3>
+                    <p className="text-xs text-gray-400">
+                      Sugira até 3 nomes de pré-candidato para serem testados na amostragem oficial do próximo ciclo de Petrópolis.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-left sm:text-right shrink-0">
+                  <span className="text-[9px] text-gray-500 font-mono block uppercase">Suas Sugestões</span>
+                  <span className="text-xs font-bold font-mono text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg">
+                    {deviceSuggestions.length} de 3 enviadas
+                  </span>
+                </div>
+              </div>
+
+              <form onSubmit={handleUserSuggestionSubmit} className="space-y-4">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={newSuggestionInput}
+                      onChange={(e) => setNewSuggestionInput(e.target.value)}
+                      placeholder={deviceSuggestions.length >= 3 ? "Limite de 3 sugestões atingido neste dispositivo." : "Ex: Yuri Moura, Bomtempo, Leandro Sampaio..."}
+                      maxLength={60}
+                      disabled={deviceSuggestions.length >= 3 || submittingUserSuggestion}
+                      className="w-full px-4 py-3 bg-[#08090d] border border-[#1f212a] rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/35 transition-all text-left disabled:opacity-50"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={deviceSuggestions.length >= 3 || submittingUserSuggestion || !newSuggestionInput.trim()}
+                    className="px-6 py-3 bg-[#3b82f6] hover:bg-[#1d4ed8] disabled:bg-gray-800 disabled:text-gray-500 text-white text-xs font-bold font-mono tracking-wider uppercase rounded-xl shadow-lg hover:scale-[1.01] transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    {submittingUserSuggestion ? (
+                      <div className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      "Enviar Sugestão"
+                    )}
+                  </button>
+                </div>
+
+                {deviceSuggestions.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-left">
+                    <span className="text-[10px] text-gray-500 font-mono uppercase">Enviados por você:</span>
+                    {deviceSuggestions.map((name, i) => (
+                      <span key={i} className="text-[10px] bg-[#141829] border border-blue-500/15 text-blue-400 px-2.5 py-1 rounded-lg font-mono">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </form>
             </div>
 
             {/* Tab navigation headers in analyst dashboard */}

@@ -1,0 +1,151 @@
+{
+  "entities": {
+    "CandidateSuggestion": {
+      "title": "CandidateSuggestion",
+      "description": "An open text pre-candidate suggestion submitted by a respondent for the next research cycle",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the suggestion"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO timestamp of when the suggestion was submitted"
+        },
+        "suggestedCandidate": {
+          "type": "string",
+          "description": "The name of the suggested pre-candidate"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "suggestedCandidate"
+      ]
+    },
+    "SurveyResponse": {
+      "title": "SurveyResponse",
+      "description": "A single survey response containing regional research questions for Petrópolis-RJ",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the response"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO timestamp of when the survey was completed"
+        },
+        "gender": {
+          "type": "string",
+          "description": "Gender identity of the respondent"
+        },
+        "age": {
+          "type": "string",
+          "description": "Age group of the respondent"
+        },
+        "neighborhood": {
+          "type": "string",
+          "description": "The neighborhood/district name"
+        },
+        "evalLula": {
+          "type": "string",
+          "description": "President Lula's evaluation rating"
+        },
+        "evalGovernor": {
+          "type": "string",
+          "description": "Governor Castro's evaluation rating"
+        },
+        "evalMayor": {
+          "type": "string",
+          "description": "Mayor Hammes' evaluation rating"
+        },
+        "votePresident": {
+          "type": "string",
+          "description": "Selected presidential candidate ID or empty/none"
+        },
+        "votePresidentRunoff": {
+          "type": "string",
+          "description": "Runoff presidential candidate ID or empty/none"
+        },
+        "voteGovernor": {
+          "type": "string",
+          "description": "Selected governor candidate ID or empty/none"
+        },
+        "voteGovernorRunoff": {
+          "type": "string",
+          "description": "Runoff governor candidate ID or empty/none"
+        },
+        "voteSenate": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of selected senate candidate IDs"
+        },
+        "voteStateDeputy": {
+          "type": "string",
+          "description": "Selected state deputy candidate ID or empty/none"
+        },
+        "voteFederalDeputy": {
+          "type": "string",
+          "description": "Selected federal deputy candidate ID or empty/none"
+        },
+        "voteMayorPetropolis": {
+          "type": "string",
+          "description": "Selected mayoral candidate ID or empty/none"
+        },
+        "education": {
+          "type": "string",
+          "description": "Education level of the respondent"
+        },
+        "income": {
+          "type": "string",
+          "description": "Income level of the respondent"
+        },
+        "color": {
+          "type": "string",
+          "description": "Ethnicity/color of the respondent"
+        },
+        "religion": {
+          "type": "string",
+          "description": "Religion of the respondent"
+        },
+        "suggestedCandidate": {
+          "type": "string",
+          "description": "Respondent's suggestion of a pre-candidate to be tested in the next sampling"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "gender",
+        "age",
+        "neighborhood",
+        "evalLula",
+        "evalGovernor",
+        "evalMayor",
+        "votePresident",
+        "voteGovernor",
+        "voteSenate",
+        "voteStateDeputy",
+        "voteFederalDeputy",
+        "education",
+        "income",
+        "color",
+        "religion"
+      ]
+    }
+  },
+  "firestore": {
+    "responses": {
+      "schema": "#/entities/SurveyResponse",
+      "description": "Collection of all public regional survey responses"
+    },
+    "suggestions": {
+      "schema": "#/entities/CandidateSuggestion",
+      "description": "Collection of open text pre-candidate suggestions submitted directly by visitors"
+    }
+  }
+}

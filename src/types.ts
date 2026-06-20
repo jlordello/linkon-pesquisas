@@ -69,149 +69,237 @@ export interface RunoffScenario {
 }
 
 // Initial Mock data based on realistic regional scenario for Petrópolis-RJ
-export const initialPollData: PollData = {
-  metadata: {
-    municipality: "Petrópolis-RJ",
-    sampleSize: 0,
-    marginOfError: 0.0,
-    confidenceLevel: 95,
-    fieldPeriod: "Coleta amadora em tempo real",
-    registryNumber: "Sondagem eleitoral permitida pela resolução nº 23.600 do TSE."
-  },
-  evaluations: [
-    {
-      id: "eval-lula",
-      entity: "Lula",
-      role: "Presidente da República",
-      positive: 0,
-      regular: 0,
-      negative: 0,
-      dontKnow: 0
-    },
-    {
-      id: "eval-couto",
-      entity: "Ricardo Couto",
-      role: "Governador do Estado (RJ)",
-      positive: 0,
-      regular: 0,
-      negative: 0,
-      dontKnow: 0
-    },
-    {
-      id: "eval-hingo",
-      entity: "Hingo Hammes",
-      role: "Prefeito de Petrópolis",
-      positive: 0,
-      regular: 0,
-      negative: 0,
-      dontKnow: 0
+export interface CandidateConfig {
+  id: string;
+  name: string;
+  party: string;
+}
+
+export interface QuestionConfig {
+  stepIndex: number;
+  key: string;
+  title: string;
+  subtitle: string;
+  category: "president" | "presidentRunoff" | "governor" | "governorRunoff" | "senate" | "stateDeputy" | "federalDeputy" | "mayor";
+  active: boolean;
+}
+
+export function getActiveCandidates(category: string): CandidateConfig[] {
+  try {
+    const saved = localStorage.getItem("linkon_custom_candidates_" + category);
+    if (saved) {
+      return JSON.parse(saved);
     }
-  ],
-  presidentScenario: {
-    candidates: [
-      { id: "pres-lula", name: "Lula", party: "PT", votes: 0 },
-      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", votes: 0 },
-      { id: "pres-caiado", name: "Ronaldo Caiado", party: "PSD", votes: 0 },
-      { id: "pres-zema", name: "Romeu Zema", party: "NOVO", votes: 0 },
-      { id: "pres-renan", name: "Renan Santos", party: "Missão", votes: 0 },
-      { id: "pres-daciolo", name: "Cabo Daciolo", party: "Mobiliza", votes: 0 },
-      { id: "pres-samara", name: "Samara Martins", party: "UP", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0,
-    spontaneousTop: []
+  } catch (e) {
+    console.error(e);
+  }
+
+  // Default fallbacks
+  if (category === "president") {
+    return [
+      { id: "pres-lula", name: "Lula", party: "PT" },
+      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL" },
+      { id: "pres-caiado", name: "Ronaldo Caiado", party: "PSD" },
+      { id: "pres-zema", name: "Romeu Zema", party: "NOVO" },
+      { id: "pres-renan", name: "Renan Santos", party: "Missão" },
+      { id: "pres-daciolo", name: "Cabo Daciolo", party: "Mobiliza" },
+      { id: "pres-samara", name: "Samara Martins", party: "UP" }
+    ];
+  }
+  if (category === "presidentRunoff") {
+    return [
+      { id: "pres-lula", name: "Lula", party: "PT" },
+      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL" }
+    ];
+  }
+  if (category === "governor") {
+    return [
+      { id: "gov-paes", name: "Eduardo Paes", party: "PSD" },
+      { id: "gov-ruas", name: "Douglas Ruas", party: "PL" },
+      { id: "gov-luizinho", name: "Dr. Luizinho", party: "PP" },
+      { id: "gov-reis", name: "Washington Reis", party: "MDB" },
+      { id: "gov-marinho", name: "André Marinho", party: "NOVO" },
+      { id: "gov-siri", name: "William Siri", party: "PSOL" },
+      { id: "gov-amorim", name: "Rodrigo Amorim", party: "União" }
+    ];
+  }
+  if (category === "governorRunoff") {
+    return [
+      { id: "gov-paes", name: "Eduardo Paes", party: "PSD" },
+      { id: "gov-ruas", name: "Douglas Ruas", party: "PL" }
+    ];
+  }
+  if (category === "senate") {
+    return [
+      { id: "sen-crivella", name: "Marcelo Crivella", party: "Republicanos" },
+      { id: "sen-benedita", name: "Benedita da Silva", party: "PT" },
+      { id: "sen-monica", name: "Mônica Benício", party: "PSOL" },
+      { id: "sen-otoni", name: "Otoni de Paula", party: "MDB" },
+      { id: "sen-pedro", name: "Pedro Paulo", party: "PSD" }
+    ];
+  }
+  if (category === "stateDeputy") {
+    return [
+      { id: "est-yuri", name: "Yuri Moura", party: "PSOL" },
+      { id: "est-fred", name: "Fred Procópio", party: "MDB" },
+      { id: "est-octavio", name: "Octávio Sampaio", party: "PL" },
+      { id: "est-junior", name: "Junior Paixão", party: "PSDB" },
+      { id: "est-paulo", name: "Paulo Mustrangi", party: "PT" },
+      { id: "est-gilda", name: "Gilda Beatriz", party: "PP" },
+      { id: "est-eduardo", name: "Eduardo do blog", party: "PSD" },
+      { id: "est-rodrigo", name: "Rodrigo Amorim", party: "União" },
+      { id: "est-renata", name: "Renata Souza", party: "PSOL" },
+      { id: "est-sergio", name: "Sergio Fernandes", party: "PSD" },
+      { id: "est-leonardo", name: "Leonardo França", party: "PT" },
+      { id: "est-dani", name: "Dani Balbi", party: "PCdoB" }
+    ];
+  }
+  if (category === "federalDeputy") {
+    return [
+      { id: "fed-hugo", name: "Hugo Leal", party: "PSD" },
+      { id: "fed-bernardo", name: "Bernardo Rossi", party: "União Brasil" },
+      { id: "fed-rubens", name: "Rubens Bomtempo", party: "PT" },
+      { id: "fed-leandro", name: "Leandro Azevedo", party: "Republicanos" },
+      { id: "fed-julia", name: "Júlia Casamasso", party: "PSOL" },
+      { id: "fed-pazuello", name: "General Pazuello", party: "PL" },
+      { id: "fed-taliria", name: "Talíria Petrone", party: "PSOL" },
+      { id: "fed-taina", name: "Tainá de Paula", party: "PT" },
+      { id: "fed-jandira", name: "Jandira Feghali", party: "PCdoB" },
+      { id: "fed-lindbergh", name: "Lindbergh Farias", party: "PT" },
+      { id: "fed-reimont", name: "Reimont", party: "PT" },
+      { id: "fed-helio", name: "Helio Lopes", party: "PL" },
+      { id: "fed-daniela", name: "Daniela do Waguinho", party: "União Brasil" },
+      { id: "fed-luizinho", name: "Dr. Luizinho", party: "PP" }
+    ];
+  }
+  if (category === "mayor") {
+    return [
+      { id: "may-hingo", name: "Hingo Hammes", party: "PP" },
+      { id: "may-yuri", name: "Yuri Moura", party: "PSOL" },
+      { id: "may-paulo", name: "Paulo Mustrangi", party: "PT" },
+      { id: "may-rubens", name: "Rubens Bomtempo", party: "PT" },
+      { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos" }
+    ];
+  }
+
+  return [];
+}
+
+export function saveActiveCandidates(category: string, list: CandidateConfig[]) {
+  try {
+    localStorage.setItem("linkon_custom_candidates_" + category, JSON.stringify(list));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+export function getActiveQuestions(): QuestionConfig[] {
+  try {
+    const saved = localStorage.getItem("linkon_custom_questions");
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+
+  return [
+    { stepIndex: 3, key: "votePresident", title: "Cenário Presidencial Estimulado (1º Turno)", subtitle: "Se as eleições presidenciais fossem hoje, em qual destes candidatos você votaria?", category: "president", active: true },
+    { stepIndex: 4, key: "votePresidentRunoff", title: "Cenário Presidencial de Segundo Turno (Simulação)", subtitle: "Em um eventual segundo turno para Presidente entre Lula e Flávio Bolsonaro, em qual destes você votaria?", category: "presidentRunoff", active: true },
+    { stepIndex: 5, key: "voteGovernor", title: "Cenário Estadual (Governador - RJ)", subtitle: "Se as eleições para Governador do Estado fossem hoje, qual destas opções você escolheria?", category: "governor", active: true },
+    { stepIndex: 6, key: "voteGovernorRunoff", title: "Cenário Estadual de Segundo Turno (Governador • Simulação)", subtitle: "Em um eventual segundo turno para Governador entre Eduardo Paes e Douglas Ruas, qual candidato você escolheria?", category: "governorRunoff", active: true },
+    { stepIndex: 7, key: "voteSenate", title: "Senador da República (Escolha até 2 opções)", subtitle: "Se as eleições fossem hoje, em quais dois senadores você votaria?", category: "senate", active: true },
+    { stepIndex: 8, key: "voteStateDeputy", title: "Cenário Proporcional - Deputado Estadual", subtitle: "Para representar a Região Serrana na ALERJ, qual desses pré-candidatos você escolheria hoje?", category: "stateDeputy", active: true },
+    { stepIndex: 9, key: "voteFederalDeputy", title: "Cenário Federal - Deputado Federal", subtitle: "Para ser o representative de Petrópolis em Brasília, em qual candidato você depositaria seu voto?", category: "federalDeputy", active: true },
+    { stepIndex: 10, key: "voteMayorPetropolis", title: "Eleição Municipal - Prefeito de Petrópolis", subtitle: "Se as eleições para Prefeito de Petrópolis fossem hoje, qual destas opções você escolheria?", category: "mayor", active: true }
+  ];
+}
+
+export function saveActiveQuestions(questions: QuestionConfig[]) {
+  try {
+    localStorage.setItem("linkon_custom_questions", JSON.stringify(questions));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+export const initialPollData: PollData = {
+  get metadata() {
+    return {
+      municipality: "Petrópolis-RJ",
+      sampleSize: 0,
+      marginOfError: 0.0,
+      confidenceLevel: 95,
+      fieldPeriod: "Coleta amadora em tempo real",
+      registryNumber: "Sondagem eleitoral permitida pela resolução nº 23.600 do TSE."
+    };
   },
-  governorScenario: {
-    candidates: [
-      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", votes: 0 },
-      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", votes: 0 },
-      { id: "gov-luizinho", name: "Dr. Luizinho", party: "PP", votes: 0 },
-      { id: "gov-reis", name: "Washington Reis", party: "MDB", votes: 0 },
-      { id: "gov-marinho", name: "André Marinho", party: "NOVO", votes: 0 },
-      { id: "gov-siri", name: "William Siri", party: "PSOL", votes: 0 },
-      { id: "gov-amorim", name: "Rodrigo Amorim", party: "União", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0,
-    spontaneousTop: []
+  get evaluations() {
+    return [
+      { id: "eval-lula", entity: "Lula", role: "Presidente da República", positive: 0, regular: 0, negative: 0, dontKnow: 0 },
+      { id: "eval-couto", entity: "Ricardo Couto", role: "Governador do Estado (RJ)", positive: 0, regular: 0, negative: 0, dontKnow: 0 },
+      { id: "eval-hingo", entity: "Hingo Hammes", role: "Prefeito de Petrópolis", positive: 0, regular: 0, negative: 0, dontKnow: 0 }
+    ];
   },
-  senateScenario: {
-    candidates: [
-      { id: "sen-crivella", name: "Marcelo Crivella", party: "Republicanos", votes: 0 },
-      { id: "sen-benedita", name: "Benedita da Silva", party: "PT", votes: 0 },
-      { id: "sen-monica", name: "Mônica Benício", party: "PSOL", votes: 0 },
-      { id: "sen-otoni", name: "Otoni de Paula", party: "MDB", votes: 0 },
-      { id: "sen-pedro", name: "Pedro Paulo", party: "PSD", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0
+  get presidentScenario() {
+    return {
+      candidates: getActiveCandidates("president").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0,
+      spontaneousTop: []
+    };
   },
-  stateDeputyScenario: {
-    candidates: [
-      { id: "est-yuri", name: "Yuri Moura", party: "PSOL", votes: 0 },
-      { id: "est-fred", name: "Fred Procópio", party: "MDB", votes: 0 },
-      { id: "est-octavio", name: "Octávio Sampaio", party: "PL", votes: 0 },
-      { id: "est-junior", name: "Junior Paixão", party: "PSDB", votes: 0 },
-      { id: "est-paulo", name: "Paulo Mustrangi", party: "PT", votes: 0 },
-      { id: "est-gilda", name: "Gilda Beatriz", party: "PP", votes: 0 },
-      { id: "est-eduardo", name: "Eduardo do blog", party: "PSD", votes: 0 },
-      { id: "est-rodrigo", name: "Rodrigo Amorim", party: "União", votes: 0 },
-      { id: "est-renata", name: "Renata Souza", party: "PSOL", votes: 0 },
-      { id: "est-sergio", name: "Sergio Fernandes", party: "PSD", votes: 0 },
-      { id: "est-leonardo", name: "Leonardo França", party: "PT", votes: 0 },
-      { id: "est-dani", name: "Dani Balbi", party: "PCdoB", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0
+  get governorScenario() {
+    return {
+      candidates: getActiveCandidates("governor").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0,
+      spontaneousTop: []
+    };
   },
-  federalDeputyScenario: {
-    candidates: [
-      { id: "fed-hugo", name: "Hugo Leal", party: "PSD", votes: 0 },
-      { id: "fed-bernardo", name: "Bernardo Rossi", party: "União Brasil", votes: 0 },
-      { id: "fed-rubens", name: "Rubens Bomtempo", party: "PT", votes: 0 },
-      { id: "fed-leandro", name: "Leandro Azevedo", party: "Republicanos", votes: 0 },
-      { id: "fed-julia", name: "Júlia Casamasso", party: "PSOL", votes: 0 },
-      { id: "fed-pazuello", name: "General Pazuello", party: "PL", votes: 0 },
-      { id: "fed-taliria", name: "Talíria Petrone", party: "PSOL", votes: 0 },
-      { id: "fed-taina", name: "Tainá de Paula", party: "PT", votes: 0 },
-      { id: "fed-jandira", name: "Jandira Feghali", party: "PCdoB", votes: 0 },
-      { id: "fed-lindbergh", name: "Lindbergh Farias", party: "PT", votes: 0 },
-      { id: "fed-reimont", name: "Reimont", party: "PT", votes: 0 },
-      { id: "fed-helio", name: "Helio Lopes", party: "PL", votes: 0 },
-      { id: "fed-daniela", name: "Daniela do Waguinho", party: "União Brasil", votes: 0 },
-      { id: "fed-luizinho", name: "Dr. Luizinho", party: "PP", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0
+  get senateScenario() {
+    return {
+      candidates: getActiveCandidates("senate").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0
+    };
   },
-  presidentRunoff: {
-    candidates: [
-      { id: "pres-lula", name: "Lula", party: "PT", votes: 0 },
-      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0,
-    showRunoff: true
+  get stateDeputyScenario() {
+    return {
+      candidates: getActiveCandidates("stateDeputy").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0
+    };
   },
-  governorRunoff: {
-    candidates: [
-      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", votes: 0 },
-      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0,
-    showRunoff: true
+  get federalDeputyScenario() {
+    return {
+      candidates: getActiveCandidates("federalDeputy").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0
+    };
   },
-  mayorScenario: {
-    candidates: [
-      { id: "may-hingo", name: "Hingo Hammes", party: "PP", votes: 0 },
-      { id: "may-yuri", name: "Yuri Moura", party: "PSOL", votes: 0 },
-      { id: "may-paulo", name: "Paulo Mustrangi", party: "PT", votes: 0 },
-      { id: "may-rubens", name: "Rubens Bomtempo", party: "PT", votes: 0 },
-      { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos", votes: 0 }
-    ],
-    brancosNulos: 0,
-    indecisos: 0
+  get presidentRunoff() {
+    return {
+      candidates: getActiveCandidates("presidentRunoff").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0,
+      showRunoff: true
+    };
+  },
+  get governorRunoff() {
+    return {
+      candidates: getActiveCandidates("governorRunoff").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0,
+      showRunoff: true
+    };
+  },
+  get mayorScenario() {
+    return {
+      candidates: getActiveCandidates("mayor").map(c => ({ ...c, votes: 0 })),
+      brancosNulos: 0,
+      indecisos: 0
+    };
   }
 };
 
@@ -446,8 +534,9 @@ export interface SurveyResponse {
   voteMayorPetropolis?: string; // Hingo Hammes, Yuri Moura, etc. or "brancosNulos"/"indecisos"
   education: string;     // "Fundamental Completo ou Incompleto" | "Ensino Médio Completo ou Incompleto" | "Ensino Superior Completo ou Mais"
   income: string;        // "Até 2 Salários Mínimos" | "De 2 a 5 Salários Mínimos" | "Mais de 5 Salários Mínimos"
-  color: string;         // "Amarela" | "Branca" | "Indígena" | "Parda" | "Preta"
+  color: string;         // "Amarela" | "Branca" | "Indígena" | "Parda" | "Preta" | "Quilombola"
   religion: string;      // "Católica" | "Evangélica/Protestante" | "Espírita / Umbanda / Candomblé" | "Outra / Sem Religião"
+  suggestedCandidate?: string; // Open-text suggestion for next cycle candidate
 }
 
 export const NEIGHBORHOODS_BY_DISTRICT: Record<string, string[]> = {
@@ -537,15 +626,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
   });
 
   // President Scenario
-  const basePresCandidates = [
-    { id: "pres-lula", name: "Lula", party: "PT" },
-    { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL" },
-    { id: "pres-caiado", name: "Ronaldo Caiado", party: "PSD" },
-    { id: "pres-zema", name: "Romeu Zema", party: "NOVO" },
-    { id: "pres-renan", name: "Renan Santos", party: "Missão" },
-    { id: "pres-daciolo", name: "Cabo Daciolo", party: "Mobiliza" },
-    { id: "pres-samara", name: "Samara Martins", party: "UP" }
-  ];
+  const basePresCandidates = getActiveCandidates("president");
 
   let presBrancos = 0;
   let presIndecisos = 0;
@@ -573,15 +654,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
   };
 
   // Governor Scenario
-  const baseGovCandidates = [
-    { id: "gov-paes", name: "Eduardo Paes", party: "PSD" },
-    { id: "gov-ruas", name: "Douglas Ruas", party: "PL" },
-    { id: "gov-luizinho", name: "Dr. Luizinho", party: "PP" },
-    { id: "gov-reis", name: "Washington Reis", party: "MDB" },
-    { id: "gov-marinho", name: "André Marinho", party: "NOVO" },
-    { id: "gov-siri", name: "William Siri", party: "PSOL" },
-    { id: "gov-amorim", name: "Rodrigo Amorim", party: "União" }
-  ];
+  const baseGovCandidates = getActiveCandidates("governor");
 
   let govBrancos = 0;
   let govIndecisos = 0;
@@ -609,13 +682,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
   };
 
   // Senate Scenario
-  const baseSenCandidates = [
-    { id: "sen-crivella", name: "Marcelo Crivella", party: "Republicanos" },
-    { id: "sen-benedita", name: "Benedita da Silva", party: "PT" },
-    { id: "sen-monica", name: "Mônica Benício", party: "PSOL" },
-    { id: "sen-otoni", name: "Otoni de Paula", party: "MDB" },
-    { id: "sen-pedro", name: "Pedro Paulo", party: "PSD" }
-  ];
+  const baseSenCandidates = getActiveCandidates("senate");
 
   let senBrancos = 0;
   let senIndecisos = 0;
@@ -653,20 +720,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
   };
 
   // State Deputy Scenario
-  const baseStateCandidates = [
-    { id: "est-yuri", name: "Yuri Moura", party: "PSOL" },
-    { id: "est-fred", name: "Fred Procópio", party: "MDB" },
-    { id: "est-octavio", name: "Octávio Sampaio", party: "PL" },
-    { id: "est-junior", name: "Junior Paixão", party: "PSDB" },
-    { id: "est-paulo", name: "Paulo Mustrangi", party: "PT" },
-    { id: "est-gilda", name: "Gilda Beatriz", party: "PP" },
-    { id: "est-eduardo", name: "Eduardo do blog", party: "PSD" },
-    { id: "est-rodrigo", name: "Rodrigo Amorim", party: "União" },
-    { id: "est-renata", name: "Renata Souza", party: "PSOL" },
-    { id: "est-sergio", name: "Sergio Fernandes", party: "PSD" },
-    { id: "est-leonardo", name: "Leonardo França", party: "PT" },
-    { id: "est-dani", name: "Dani Balbi", party: "PCdoB" }
-  ];
+  const baseStateCandidates = getActiveCandidates("stateDeputy");
 
   let stateBrancos = 0;
   let stateIndecisos = 0;
@@ -693,22 +747,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
   };
 
   // Federal Deputy Scenario
-  const baseFederalCandidates = [
-    { id: "fed-hugo", name: "Hugo Leal", party: "PSD" },
-    { id: "fed-bernardo", name: "Bernardo Rossi", party: "União Brasil" },
-    { id: "fed-rubens", name: "Rubens Bomtempo", party: "PT" },
-    { id: "fed-leandro", name: "Leandro Azevedo", party: "Republicanos" },
-    { id: "fed-julia", name: "Júlia Casamasso", party: "PSOL" },
-    { id: "fed-pazuello", name: "General Pazuello", party: "PL" },
-    { id: "fed-taliria", name: "Talíria Petrone", party: "PSOL" },
-    { id: "fed-taina", name: "Tainá de Paula", party: "PT" },
-    { id: "fed-jandira", name: "Jandira Feghali", party: "PCdoB" },
-    { id: "fed-lindbergh", name: "Lindbergh Farias", party: "PT" },
-    { id: "fed-reimont", name: "Reimont", party: "PT" },
-    { id: "fed-helio", name: "Helio Lopes", party: "PL" },
-    { id: "fed-daniela", name: "Daniela do Waguinho", party: "União Brasil" },
-    { id: "fed-luizinho", name: "Dr. Luizinho", party: "PP" }
-  ];
+  const baseFederalCandidates = getActiveCandidates("federalDeputy");
 
   let fedBrancos = 0;
   let fedIndecisos = 0;
@@ -734,89 +773,67 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     indecisos: parseFloat(((fedIndecisos / total) * 100).toFixed(1))
   };
 
-  // Runoff (Segundo Turno) Scenarios - Fixed Match-ups
-  let presRunoffCand1Votes = 0; // pres-lula
-  let presRunoffCand2Votes = 0; // pres-flavio
+  // Runoff (Segundo Turno) Scenarios
+  const basePresRunoffCandidates = getActiveCandidates("presidentRunoff");
   let presRunoffBrancos = 0;
   let presRunoffIndecisos = 0;
+  const presRunoffCounts: Record<string, number> = {};
+  basePresRunoffCandidates.forEach(c => { presRunoffCounts[c.id] = 0; });
 
   responses.forEach(r => {
     const val = r.votePresidentRunoff || "";
-    if (val === "pres-lula") {
-      presRunoffCand1Votes++;
-    } else if (val === "pres-flavio") {
-      presRunoffCand2Votes++;
-    } else if (val === "brancosNulos") {
+    if (val === "brancosNulos") {
       presRunoffBrancos++;
     } else if (val === "indecisos") {
       presRunoffIndecisos++;
+    } else if (presRunoffCounts[val] !== undefined) {
+      presRunoffCounts[val]++;
     } else {
-      // Fallback distribution for older data if any empty
-      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
-      if (hash % 2 === 0) {
-        presRunoffCand1Votes++;
-      } else {
-        presRunoffCand2Votes++;
-      }
+      presRunoffIndecisos++;
     }
   });
 
   const presidentRunoff = {
-    candidates: [
-      { id: "pres-lula", name: "Lula", party: "PT", votes: total > 0 ? parseFloat(((presRunoffCand1Votes / total) * 100).toFixed(1)) : 0 },
-      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", votes: total > 0 ? parseFloat(((presRunoffCand2Votes / total) * 100).toFixed(1)) : 0 }
-    ].sort((a, b) => b.votes - a.votes),
+    candidates: basePresRunoffCandidates.map(c => ({
+      ...c,
+      votes: total > 0 ? parseFloat(((presRunoffCounts[c.id] / total) * 100).toFixed(1)) : 0
+    })).sort((a, b) => b.votes - a.votes),
     brancosNulos: total > 0 ? parseFloat(((presRunoffBrancos / total) * 100).toFixed(1)) : 0,
     indecisos: total > 0 ? parseFloat(((presRunoffIndecisos / total) * 100).toFixed(1)) : 0,
     showRunoff: true
   };
 
-  let govRunoffCand1Votes = 0; // gov-paes
-  let govRunoffCand2Votes = 0; // gov-ruas
+  const baseGovRunoffCandidates = getActiveCandidates("governorRunoff");
   let govRunoffBrancos = 0;
   let govRunoffIndecisos = 0;
+  const govRunoffCounts: Record<string, number> = {};
+  baseGovRunoffCandidates.forEach(c => { govRunoffCounts[c.id] = 0; });
 
   responses.forEach(r => {
     const val = r.voteGovernorRunoff || "";
-    if (val === "gov-paes") {
-      govRunoffCand1Votes++;
-    } else if (val === "gov-ruas") {
-      govRunoffCand2Votes++;
-    } else if (val === "brancosNulos") {
+    if (val === "brancosNulos") {
       govRunoffBrancos++;
     } else if (val === "indecisos") {
       govRunoffIndecisos++;
+    } else if (govRunoffCounts[val] !== undefined) {
+      govRunoffCounts[val]++;
     } else {
-      // Fallback distribution for older data
-      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
-      if (hash % 3 === 0) {
-        govRunoffCand1Votes++;
-      } else if (hash % 3 === 1) {
-        govRunoffCand2Votes++;
-      } else {
-        govRunoffBrancos++;
-      }
+      govRunoffIndecisos++;
     }
   });
 
   const governorRunoff = {
-    candidates: [
-      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", votes: total > 0 ? parseFloat(((govRunoffCand1Votes / total) * 100).toFixed(1)) : 0 },
-      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", votes: total > 0 ? parseFloat(((govRunoffCand2Votes / total) * 100).toFixed(1)) : 0 }
-    ].sort((a, b) => b.votes - a.votes),
+    candidates: baseGovRunoffCandidates.map(c => ({
+      ...c,
+      votes: total > 0 ? parseFloat(((govRunoffCounts[c.id] / total) * 100).toFixed(1)) : 0
+    })).sort((a, b) => b.votes - a.votes),
     brancosNulos: total > 0 ? parseFloat(((govRunoffBrancos / total) * 100).toFixed(1)) : 0,
     indecisos: total > 0 ? parseFloat(((govRunoffIndecisos / total) * 100).toFixed(1)) : 0,
     showRunoff: true
   };
 
   // Mayor of Petrópolis Scenario
-  const baseMayorCandidates = [
-    { id: "may-hingo", name: "Hingo Hammes", party: "PP" },
-    { id: "may-yuri", name: "Yuri Moura", party: "PSOL" },
-    { id: "may-paulo", name: "Paulo Mustrangi", party: "PT" },
-    { id: "may-rubens", name: "Rubens Bomtempo", party: "PT" },
-    { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos" }
-  ];
+  const baseMayorCandidates = getActiveCandidates("mayor");
 
   let mayBrancos = 0;
   let mayIndecisos = 0;
@@ -832,10 +849,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     } else if (mayCounts[val] !== undefined) {
       mayCounts[val]++;
     } else {
-      // Fallback redistribution for older mock data
-      const hash = r.id.charCodeAt(r.id.length - 1) || 0;
-      const fallbackId = baseMayorCandidates[hash % baseMayorCandidates.length].id;
-      mayCounts[fallbackId]++;
+      mayIndecisos++;
     }
   });
 
@@ -852,7 +866,7 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     metadata: {
       municipality: "Petrópolis-RJ",
       sampleSize: total,
-      marginOfError: total > 0 ? parseFloat(Math.max(1.1, Math.min(2.1, 2.1 - (total * 0.001))).toFixed(1)) : 0.0,
+      marginOfError: total > 0 ? parseFloat((1.96 * Math.sqrt(0.25 / total) * 100).toFixed(1)) : 0.0,
       confidenceLevel: 95,
       fieldPeriod: `de ${getCurrentCycleDates().start} a ${getCurrentCycleDates().end}`,
       registryNumber: "Sondagem eleitoral permitida pela resolução nº 23.600 do TSE."
