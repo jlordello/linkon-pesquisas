@@ -3,6 +3,16 @@ export interface Candidate {
   name: string;
   party: string;
   votes: number; // Percentage out of 100 in Votos Totais
+  photo?: string;
+  color?: string;
+}
+
+export interface ResolvedCandidate {
+  id: string;
+  name: string;
+  party?: string;
+  photo?: string;
+  specialType?: "brancosNulos" | "indecisos";
 }
 
 export interface Evaluation {
@@ -73,6 +83,8 @@ export interface CandidateConfig {
   id: string;
   name: string;
   party: string;
+  photo?: string;
+  color?: string;
 }
 
 export interface QuestionConfig {
@@ -537,6 +549,7 @@ export interface SurveyResponse {
   religion: string;      // "Católica" | "Evangélica/Protestante" | "Espírita / Umbanda / Candomblé" | "Outra / Sem Religião"
   suggestedCandidate?: string; // Open-text suggestion for next cycle candidate
   deviceHash?: string;   // Device fingerprint value
+  ipHash?: string;       // Unique secure SHA-256 hash of voter IP address
 }
 
 export const NEIGHBORHOODS_BY_DISTRICT: Record<string, string[]> = {
@@ -977,6 +990,7 @@ export interface CandidateDemographicProfile {
     "60+": number;
   };
   neighborhoods: { neighborhood: string; percentage: number; count: number }[];
+  districts: { district: string; percentage: number; count: number }[];
   education: Record<string, number>;
   income: Record<string, number>;
   color: Record<string, number>;
@@ -1024,6 +1038,7 @@ export function calculateCandidateProfile(
       gender: { feminino: 0, masculino: 0, outro: 0 },
       age: { "16-24": 0, "25-34": 0, "35-44": 0, "45-59": 0, "60+": 0 },
       neighborhoods: [],
+      districts: [],
       education: {},
       income: {},
       color: {},
@@ -1064,6 +1079,22 @@ export function calculateCandidateProfile(
   const sortedNeighborhoods = Object.entries(neighCounts)
     .map(([neighborhood, count]) => ({
       neighborhood,
+      count,
+      percentage: parseFloat(((count / totalVotes) * 100).toFixed(1))
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  // Calculate Districts
+  const districtCounts: Record<string, number> = {};
+  candidateVoters.forEach(r => {
+    if (r.neighborhood) {
+      const d = getDistrictForNeighborhood(r.neighborhood);
+      districtCounts[d] = (districtCounts[d] || 0) + 1;
+    }
+  });
+  const sortedDistricts = Object.entries(districtCounts)
+    .map(([district, count]) => ({
+      district,
       count,
       percentage: parseFloat(((count / totalVotes) * 100).toFixed(1))
     }))
@@ -1152,6 +1183,7 @@ export function calculateCandidateProfile(
       "60+": parseFloat(((age5 / totalVotes) * 100).toFixed(1))
     },
     neighborhoods: sortedNeighborhoods,
+    districts: sortedDistricts,
     education,
     income,
     color,
@@ -1179,6 +1211,27 @@ export function calculateCandidateProfile(
   };
 }
 
+export async function sha256(text: string): Promise<string> {
+  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
+    try {
+      const msgUint8 = new TextEncoder().encode(text);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      // Fallback
+    }
+  }
+
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return "hash-" + Math.abs(hash).toString(36);
+}
+
 export async function getDeviceFingerprint(): Promise<string> {
   const parts = [
     typeof navigator !== "undefined" ? (navigator.userAgent || "unknown-ua") : "unknown-ua",
@@ -1190,23 +1243,5 @@ export async function getDeviceFingerprint(): Promise<string> {
     typeof navigator !== "undefined" ? (navigator.hardwareConcurrency || 0) : 0
   ];
   const inputStr = parts.join("||");
-  
-  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
-    try {
-      const msgUint8 = new TextEncoder().encode(inputStr);
-      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) {
-      // Fallback
-    }
-  }
-
-  let hash = 0;
-  for (let i = 0; i < inputStr.length; i++) {
-    const char = inputStr.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return "fp-" + Math.abs(hash).toString(36);
+  return sha256(inputStr);
 }

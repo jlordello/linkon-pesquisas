@@ -66,6 +66,59 @@ import { EvolutionTab } from "./components/EvolutionTab";
 import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, getDocFromServer } from "firebase/firestore";
 import { db } from "./firebase";
 
+const optimizeBase64Image = (base64Str: string, maxWidth = 96, maxHeight = 96): Promise<string> => {
+  return new Promise((resolve) => {
+    if (!base64Str || !base64Str.startsWith("data:image/") || base64Str.length < 5000) {
+      resolve(base64Str);
+      return;
+    }
+
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(base64Str);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const isPng = base64Str.includes("image/png") || base64Str.includes("image/gif");
+        if (isPng) {
+          resolve(canvas.toDataURL("image/png"));
+        } else {
+          resolve(canvas.toDataURL("image/jpeg", 0.75));
+        }
+      } catch (err) {
+        console.error("Error compressing image", err);
+        resolve(base64Str);
+      }
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+  });
+};
+
 export default function App() {
   // Database States
   const [responses, setResponses] = useState<SurveyResponse[]>([]);
@@ -74,6 +127,7 @@ export default function App() {
   const [alreadyVoted, setAlreadyVoted] = useState<boolean>(false);
   const [isPrivateBrowsing, setIsPrivateBrowsing] = useState<boolean>(false);
   const [deviceHashState, setDeviceHashState] = useState<string>("");
+  const [clientIpHash, setClientIpHash] = useState<string>("");
 
   // Survey Wizard Step control
   const [surveyStep, setSurveyStep] = useState<number>(0); 
@@ -148,6 +202,8 @@ export default function App() {
   const [newQuestCategory, setNewQuestCategory] = useState<string>("president");
   const [adminCategory, setAdminCategory] = useState<"president" | "governor" | "senate" | "stateDeputy" | "federalDeputy">("president");
   const [adminCandidateId, setAdminCandidateId] = useState<string>("pres-lula");
+  const [neighborhoodSearch, setNeighborhoodSearch] = useState<string>("");
+  const [copiedNeighsText, setCopiedNeighsText] = useState<boolean>(false);
   const [copiedProfileText, setCopiedProfileText] = useState<boolean>(false);
   const [candidateProfileTab, setCandidateProfileTab] = useState<"stats" | "whatsapp">("stats");
   const [isPrivateMode, setIsPrivateMode] = useState<boolean>(false);
@@ -166,6 +222,10 @@ export default function App() {
   });
   const [newSuggestionInput, setNewSuggestionInput] = useState<string>("");
   const [submittingUserSuggestion, setSubmittingUserSuggestion] = useState<boolean>(false);
+
+  useEffect(() => {
+    setNeighborhoodSearch("");
+  }, [adminCandidateId, adminCategory]);
 
   useEffect(() => {
     if (activeView !== "analyst" && !isAdminMode) return;
@@ -215,6 +275,57 @@ export default function App() {
             await new Promise((resolve) => setTimeout(resolve, 2000));
           }
         }
+      }
+
+      // Defensive Programming Fallback: Compute local counts immediately if backend remains offline/failed
+      if (!success && isMounted) {
+        console.warn("[Instituto Linkon] Utilizando agregação local client-side para exibição imediata devido a atraso de rede.");
+        const partyMap: Record<string, string> = {
+          "Yuri Moura": "PSOL",
+          "Rubens Bomtempo": "PSB",
+          "Hingo Hammes": "PP",
+          "Bernardo Rossi": "MDB",
+          "Eduardo Do Blog": "MDB",
+          "Fred Procópio": "MDB",
+          "Leandro Sampaio": "PODEMOS",
+          "Guto Silva": "PP",
+          "Octavio Sampaio": "PL",
+          "Lula": "PT",
+          "Jair Bolsonaro": "PL"
+        };
+
+        const counts: Record<string, number> = {};
+        rawSuggestions.forEach(s => {
+          if (!s || typeof s !== "string") return;
+          const clean = s.trim();
+          if (clean) {
+            const norm = clean.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            counts[norm] = (counts[norm] || 0) + 1;
+          }
+        });
+        
+        let sorted = Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, count]) => {
+            let party = "S/D";
+            const matchKey = Object.keys(partyMap).find(k => 
+              name.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(name.toLowerCase())
+            );
+            if (matchKey) {
+              party = partyMap[matchKey];
+            }
+            return {
+              name,
+              party,
+              count,
+              analysis: `Indicação orgânica de Petrópolis. Recenseado com ${count} menções neste ciclo de coletas.`
+            };
+          });
+
+        if (sorted.length > 5) {
+          sorted = sorted.slice(0, 5);
+        }
+        setAiSuggestions(sorted);
       }
 
       if (isMounted) {
@@ -394,7 +505,10 @@ export default function App() {
 
         // Check fingerprint and private mode
         const hash = await checkSecurityAndFp();
-        const hasVoted = loaded.some(r => r.deviceHash === hash && getCycleKeyForTimestamp(r.timestamp) === currentCycle.key);
+        const hasVoted = loaded.some(r => 
+          (r.deviceHash === hash || (r.ipHash && clientIpHash && r.ipHash === clientIpHash)) && 
+          getCycleKeyForTimestamp(r.timestamp) === currentCycle.key
+        );
         if (hasVoted) {
           setAlreadyVoted(true);
         }
@@ -440,6 +554,24 @@ export default function App() {
           }
         }
 
+        // Fetch custom category candidates from Cloud if they exist (to keep everyone in sync)
+        try {
+          const candSnapshot = await getDocs(collection(db, "candidates_config"));
+          let loadedAny = false;
+          candSnapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data && data.category && Array.isArray(data.candidates)) {
+              localStorage.setItem("linkon_custom_candidates_" + data.category, JSON.stringify(data.candidates));
+              loadedAny = true;
+            }
+          });
+          if (loadedAny) {
+            setCandidateUpdateTrigger(prev => prev + 1);
+          }
+        } catch (candErr) {
+          console.error("Erro ao carregar candidatos personalizados da nuvem:", candErr);
+        }
+
       } catch (error) {
         console.error("Erro carregando do Firestore, tentando carregamento local:", error);
         // Fallback local load
@@ -476,8 +608,6 @@ export default function App() {
 
     if (hasReset) {
       showNotification(`Dados reiniciados! Novo ciclo quinzenal: ${currentCycle.start} a ${currentCycle.end}`, "info");
-    } else {
-      showNotification("Banco profissional de respostas ativo e sincronizado!", "success");
     }
   }, []);
 
@@ -553,6 +683,9 @@ export default function App() {
   };
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [deleteCandidateTarget, setDeleteCandidateTarget] = useState<{ id: string, name: string, category: string } | null>(null);
+  const [deleteQuestionTarget, setDeleteQuestionTarget] = useState<{ key: string, title: string } | null>(null);
+  const [showHardResetConfirm, setShowHardResetConfirm] = useState(false);
 
   const handleClearDatabase = () => {
     setShowClearConfirm(true);
@@ -589,6 +722,57 @@ export default function App() {
   const updateDatabase = (newResponses: SurveyResponse[]) => {
     setResponses(newResponses);
     localStorage.setItem("linkon_survey_responses", JSON.stringify(newResponses));
+  };
+
+  const handleSaveActiveCandidates = async (category: string, list: any[]) => {
+    // Proactively compress any huge base64 photos to stay well under Firestore's 1MB limit.
+    let optimizedList = list;
+    try {
+      optimizedList = await Promise.all(
+        list.map(async (cand) => {
+          if (cand.photo && typeof cand.photo === "string" && cand.photo.startsWith("data:image/")) {
+            try {
+              const smallPhoto = await optimizeBase64Image(cand.photo, 96, 96);
+              return { ...cand, photo: smallPhoto };
+            } catch (e) {
+              console.error("Erro compactando imagem no save:", e);
+              return cand;
+            }
+          }
+          return cand;
+        })
+      );
+    } catch (err) {
+      console.error("Erro ao otimizar lista de fotos:", err);
+    }
+
+    saveActiveCandidates(category, optimizedList);
+    try {
+      await setDoc(doc(db, "candidates_config", category), { category, candidates: optimizedList });
+    } catch (e) {
+      console.error("Erro ao sincronizar candidatos no Firestore:", e);
+    }
+  };
+
+  const confirmDeleteCandidate = () => {
+    if (!deleteCandidateTarget) return;
+    const { id, category } = deleteCandidateTarget;
+    const list = getActiveCandidates(category);
+    const updated = list.filter(c => c.id !== id);
+    handleSaveActiveCandidates(category, updated);
+    setCandidateUpdateTrigger(prev => prev + 1);
+    setDeleteCandidateTarget(null);
+    showNotification("Candidato removido!", "warning");
+  };
+
+  const confirmDeleteQuestion = () => {
+    if (!deleteQuestionTarget) return;
+    const { key } = deleteQuestionTarget;
+    const updated = questionsList.filter(q => q.key !== key);
+    saveActiveQuestions(updated);
+    setQuestionsList(updated);
+    setDeleteQuestionTarget(null);
+    showNotification("Pergunta excluída!", "warning");
   };
 
   // Toast notifications
@@ -826,7 +1010,8 @@ export default function App() {
       ...surveyAnswers,
       id: `li-res-usr-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
-      deviceHash: deviceHashState || (await getDeviceFingerprint())
+      deviceHash: deviceHashState || (await getDeviceFingerprint()),
+      ipHash: clientIpHash
     };
 
     const updated = [...responses, finalResponse];
@@ -937,6 +1122,10 @@ export default function App() {
     if (window.confirm("Zerar integralmente o banco de dados?")) {
       const currentCycle = getCurrentCycleDates();
       updateDatabase([]);
+      setStandaloneSuggestions([]);
+      localStorage.removeItem("linkon_standalone_suggestions");
+      setDeviceSuggestions([]);
+      localStorage.removeItem("linkon_device_suggestions");
       localStorage.removeItem("linkon_survey_submitted_" + currentCycle.key);
       localStorage.removeItem("linkon_survey_submitted");
       setAlreadyVoted(false);
@@ -944,8 +1133,12 @@ export default function App() {
       try {
         const querySnapshot = await getDocs(collection(db, "responses"));
         const deletePromises = querySnapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
-        await Promise.all(deletePromises);
-        showNotification("Banco profissional da Nuvem e base local redefinidos!", "warning");
+        
+        const sugSnapshot = await getDocs(collection(db, "suggestions"));
+        const deleteSugPromises = sugSnapshot.docs.map(docSnap => deleteDoc(docSnap.ref));
+
+        await Promise.all([...deletePromises, ...deleteSugPromises]);
+        showNotification("Banco profissional da Nuvem, coletas e sugestões limpos com sucesso!", "warning");
       } catch (e) {
         console.error("Erro limpando Firestore:", e);
         showNotification("Banco local reiniciado. Falha ao limpar nuvem.", "warning");
@@ -1019,6 +1212,47 @@ export default function App() {
     }
   };
 
+  const getCandidatesInfo = (idOrIds: string | string[], scenario: "pres" | "presRunoff" | "gov" | "govRunoff" | "sen" | "state" | "fed" | "mayor") => {
+    const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    if (ids.length === 0 || (ids.length === 1 && ids[0] === "")) {
+      return [];
+    }
+    return ids.map(id => {
+      if (id === "brancosNulos") {
+        return { id, name: "Brancos / Nulos", specialType: "brancosNulos" as const };
+      }
+      if (id === "indecisos") {
+        return { id, name: "Não Sabe / Indeciso", specialType: "indecisos" as const };
+      }
+
+      let found: any = null;
+      if (scenario === "pres") {
+        found = activePollData.presidentScenario.candidates.find(c => c.id === id);
+      } else if (scenario === "presRunoff") {
+        found = activePollData.presidentRunoff?.candidates.find(c => c.id === id);
+      } else if (scenario === "gov") {
+        found = activePollData.governorScenario.candidates.find(c => c.id === id);
+      } else if (scenario === "govRunoff") {
+        found = activePollData.governorRunoff?.candidates.find(c => c.id === id);
+      } else if (scenario === "sen") {
+        found = activePollData.senateScenario.candidates.find(c => c.id === id);
+      } else if (scenario === "state") {
+        found = activePollData.stateDeputyScenario.candidates.find(c => c.id === id);
+      } else if (scenario === "fed") {
+        found = activePollData.federalDeputyScenario.candidates.find(c => c.id === id);
+      } else if (scenario === "mayor") {
+        found = activePollData.mayorScenario?.candidates.find(c => c.id === id);
+      }
+
+      return found ? {
+        id: found.id,
+        name: found.name,
+        party: found.party,
+        photo: (found as any).photo
+      } : { id, name: id };
+    });
+  };
+
   const filteredResponses = useMemo(() => {
     return responses.filter(r => {
       const term = dbSearch.toLowerCase();
@@ -1068,6 +1302,10 @@ export default function App() {
       .map(n => `  • ${n.neighborhood}: *${n.percentage}%* (${n.count} votos)`)
       .join("\n");
       
+    const formattedDistricts = (candidateProfile.districts || [])
+      .map(d => `  • ${d.district}: *${d.percentage}%* (${d.count} votos)`)
+      .join("\n");
+
     const formattedEdu = Object.entries(candidateProfile.education || {})
       .map(([k, v]) => `  • ${k}: *${v}%*`)
       .join("\n");
@@ -1124,6 +1362,11 @@ ${formattedRel || "  • Não Informado: 100%"}
 
 --------------------------------------------
 
+*🏙️ CONCENTRAÇÃO DE VOTOS POR DISTRITO:*
+${formattedDistricts || "  (Sem distritos registrados)"}
+
+--------------------------------------------
+
 *📍 PRINCIPAIS BAIRROS DE APOIO (Top 5):*
 ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
@@ -1160,6 +1403,20 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
       setCopiedProfileText(true);
       showNotification("Dossiê consultivo do candidato copiado para WhatsApp!", "success");
       setTimeout(() => setCopiedProfileText(false), 2500);
+    });
+  };
+
+  const handleCopyAllNeighborhoods = () => {
+    if (!candidateProfile) return;
+    const neighListText = candidateProfile.neighborhoods
+      .map((n, idx) => `• ${idx + 1}. ${n.neighborhood}: *${n.percentage}%* (${n.count} ${n.count === 1 ? 'voto' : 'votos'})`)
+      .join("\n");
+    const textToCopy = `*📍 TODOS OS BAIRROS COM VOTO - ${candidateProfile.name} (${candidateProfile.party})*\n\n${neighListText || "Não há votos registrados para nenhum bairro de Petrópolis neste ciclo."}\n\n*👉 Instituto Linkon - Diagnóstico de Campo*`;
+    
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopiedNeighsText(true);
+      showNotification("Dados de todos os bairros copiados para o WhatsApp!", "success");
+      setTimeout(() => setCopiedNeighsText(false), 2000);
     });
   };
 
@@ -1369,11 +1626,14 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
                 <button
                   onClick={() => {
-                    window.location.href = "/";
+                    sessionStorage.removeItem("linkon_admin_session");
+                    setIsAdminAuthenticated(false);
+                    setIsAdminMode(false);
+                    setActiveView("interviewee");
                   }}
                   className="px-3.5 py-2 bg-[#1c1e27] hover:bg-[#252834] border border-[#2d303f] text-white text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5"
                 >
-                  Sair do Painel
+                  Voltar ao site
                 </button>
               </div>
             </div>
@@ -1385,10 +1645,10 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
             <div className="bg-[#0e0f14] border border-[#1e202e] p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1">
                 <h2 className="text-sm font-bold text-white font-mono uppercase tracking-wide">
-                  📆 Amostragem Periódica Quinzenal
+                  ⚙️ Monitoramento Geral de Coleta (Painel Privado)
                 </h2>
                 <p className="text-xs text-gray-400">
-                  Sistema programado para autorrestauração integral a cada 15 dias. Computação independente em andamento.
+                  Gerenciamento do banco de dados de amostragem e auditoria do ciclo corrente.
                 </p>
               </div>
               <div className="flex items-center gap-6 self-start md:self-auto">
@@ -1538,11 +1798,15 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                           setAdminCategory(cat.id as any);
                           // select first candidate automatically
                           let firstId = "";
-                          if (cat.id === "president") firstId = activePollData.presidentScenario.candidates[0]?.id;
-                          else if (cat.id === "governor") firstId = activePollData.governorScenario.candidates[0]?.id;
-                          else if (cat.id === "senate") firstId = activePollData.senateScenario.candidates[0]?.id;
-                          else if (cat.id === "stateDeputy") firstId = activePollData.stateDeputyScenario.candidates[0]?.id;
-                          else if (cat.id === "federalDeputy") firstId = activePollData.federalDeputyScenario.candidates[0]?.id;
+                          const getFirstAlphaId = (candidates: any[]) => {
+                            const sorted = [...candidates].sort((a,b) => a.name.localeCompare(b.name, "pt-BR"));
+                            return sorted[0]?.id || "";
+                          };
+                          if (cat.id === "president") firstId = getFirstAlphaId(activePollData.presidentScenario.candidates);
+                          else if (cat.id === "governor") firstId = getFirstAlphaId(activePollData.governorScenario.candidates);
+                          else if (cat.id === "senate") firstId = getFirstAlphaId(activePollData.senateScenario.candidates);
+                          else if (cat.id === "stateDeputy") firstId = getFirstAlphaId(activePollData.stateDeputyScenario.candidates);
+                          else if (cat.id === "federalDeputy") firstId = getFirstAlphaId(activePollData.federalDeputyScenario.candidates);
                           setAdminCandidateId(firstId);
                         }}
                         className={`w-full p-2.5 rounded-xl text-left text-xs font-semibold border transition-all flex items-center justify-between cursor-pointer ${
@@ -1579,11 +1843,11 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
                   <div className="space-y-1.5 max-h-96 overflow-y-auto scroll-smooth custom-scrollbar pr-1">
                     {(
-                      adminCategory === "president" ? activePollData.presidentScenario.candidates :
-                      adminCategory === "governor" ? activePollData.governorScenario.candidates :
-                      adminCategory === "senate" ? activePollData.senateScenario.candidates :
-                      adminCategory === "stateDeputy" ? activePollData.stateDeputyScenario.candidates :
-                      activePollData.federalDeputyScenario.candidates
+                      adminCategory === "president" ? [...activePollData.presidentScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")) :
+                      adminCategory === "governor" ? [...activePollData.governorScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")) :
+                      adminCategory === "senate" ? [...activePollData.senateScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")) :
+                      adminCategory === "stateDeputy" ? [...activePollData.stateDeputyScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")) :
+                      [...activePollData.federalDeputyScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
                     ).map((cand) => {
                       const candProfile = calculateCandidateProfile(
                         responses,
@@ -1943,32 +2207,32 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
                         </div>
 
-                        {/* Breakdown 2: Districts / Neighborhoods list */}
+                        {/* Breakdown 2A: Districts concentration list */}
                         <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
                           <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest border-b border-[#181a25] pb-2">
-                            📍 BAIRROS COM MAIOR CONCENTRAÇÃO DE ELEITORES DO CANDIDATO
+                            🏙️ CONCENTRAÇÃO DE VOTOS POR DISTRITO DO CANDIDATO
                           </h3>
                           
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                            {candidateProfile.neighborhoods.length === 0 ? (
-                              <p className="text-xs text-gray-500 italic p-2 col-span-2">Sem votos mapeados.</p>
+                            {!candidateProfile.districts || candidateProfile.districts.length === 0 ? (
+                              <p className="text-xs text-gray-500 italic p-2 col-span-2">Sem distritos mapeados.</p>
                             ) : (
-                              candidateProfile.neighborhoods.slice(0, 8).map((n, idx) => (
+                              candidateProfile.districts.map((d, idx) => (
                                 <div 
                                   key={idx} 
                                   className="bg-[#0d0e14] border border-[#1e202e] p-3.5 rounded-xl flex items-center justify-between transition-all hover:bg-[#13151f]"
                                 >
                                   <div className="space-y-0.5">
                                     <span className="text-xs font-bold text-white block">
-                                      {idx + 1}. {n.neighborhood}
+                                      {idx + 1}. {d.district}
                                     </span>
                                     <span className="text-[10px] text-gray-500 font-mono uppercase font-semibold">
-                                      {n.count} {n.count === 1 ? 'voto' : 'votos'}
+                                      {d.count} {d.count === 1 ? 'voto' : 'votos'}
                                     </span>
                                   </div>
                                   <div className="text-right">
-                                    <span className="text-xs font-mono font-extrabold text-blue-400 block">
-                                      {n.percentage}%
+                                    <span className="text-xs font-mono font-extrabold text-indigo-400 block">
+                                      {d.percentage}%
                                     </span>
                                     <span className="text-[9px] text-gray-500 block uppercase font-bold">
                                       do candidato
@@ -1976,6 +2240,88 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   </div>
                                 </div>
                               ))
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Breakdown 2B: Districts / Neighborhoods list */}
+                        <div className="bg-[#070709] border border-[#181a25] rounded-2xl p-5 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#181a25] pb-3">
+                            <h3 className="text-xs font-bold font-mono text-gray-400 uppercase tracking-widest">
+                              📍 TODOS OS BAIRROS COM VOTOS NO CANDIDATO
+                            </h3>
+                            <button
+                              type="button"
+                              onClick={handleCopyAllNeighborhoods}
+                              className="px-3 py-1.5 bg-[#14151b] hover:bg-[#1a1b24] border border-[#1f212a] text-[11px] font-bold text-blue-400 hover:text-white rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shrink-0"
+                            >
+                              {copiedNeighsText ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                  Copiado!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" />
+                                  Copiar todos os bairros
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Search Input for Neighborhoods */}
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={neighborhoodSearch}
+                              onChange={(e) => setNeighborhoodSearch(e.target.value)}
+                              placeholder="Pesquisar bairro do candidato..."
+                              className="w-full bg-[#0d0e14]/90 border border-[#1e202e] text-white placeholder-gray-500 text-xs py-2 pr-12 pl-9 rounded-xl focus:border-[#3b82f6] focus:outline-none transition-colors"
+                            />
+                            <Search className="h-3.5 w-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                            {neighborhoodSearch && (
+                              <button
+                                onClick={() => setNeighborhoodSearch("")}
+                                className="text-gray-400 hover:text-white text-[10px] uppercase font-mono absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer transition-colors"
+                              >
+                                Limpar
+                              </button>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                            {candidateProfile.neighborhoods.length === 0 ? (
+                              <p className="text-xs text-gray-500 italic p-2 col-span-2">Sem votos mapeados.</p>
+                            ) : (candidateProfile.neighborhoods || []).filter(n => 
+                              n.neighborhood.toLowerCase().includes(neighborhoodSearch.toLowerCase())
+                            ).length === 0 ? (
+                              <p className="text-xs text-gray-500 italic p-2 col-span-2">Nenhum bairro compatível com a pesquisa.</p>
+                            ) : (
+                              (candidateProfile.neighborhoods || [])
+                                .filter(n => n.neighborhood.toLowerCase().includes(neighborhoodSearch.toLowerCase()))
+                                .map((n, idx) => (
+                                  <div 
+                                    key={idx} 
+                                    className="bg-[#0d0e14] border border-[#1e202e] p-3.5 rounded-xl flex items-center justify-between transition-all hover:bg-[#13151f]"
+                                  >
+                                    <div className="space-y-0.5">
+                                      <span className="text-xs font-bold text-white block">
+                                        {n.neighborhood}
+                                      </span>
+                                      <span className="text-[10px] text-gray-500 font-mono uppercase font-semibold">
+                                        {n.count} {n.count === 1 ? 'voto' : 'votos'}
+                                      </span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-xs font-mono font-extrabold text-blue-400 block">
+                                        {n.percentage}%
+                                      </span>
+                                      <span className="text-[9px] text-gray-500 block uppercase font-bold">
+                                        do candidato
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))
                             )}
                           </div>
                         </div>
@@ -2363,7 +2709,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                               votes: 0
                             };
                             const updated = [...list, newCand];
-                            saveActiveCandidates(editCandCategory, updated);
+                            handleSaveActiveCandidates(editCandCategory, updated);
                             setNewCandName("");
                             setNewCandParty("");
                             setCandidateUpdateTrigger(prev => prev + 1);
@@ -2382,7 +2728,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                         Visualização de Candidatos Estimulados ({getActiveCandidates(editCandCategory).length})
                       </span>
                       <div className="divide-y divide-[#1f212a] bg-[#14151b]/40 border border-[#1f212a] rounded-xl overflow-hidden">
-                        {getActiveCandidates(editCandCategory).map((cand) => (
+                        {[...getActiveCandidates(editCandCategory)].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")).map((cand) => (
                           <div
                             key={cand.id}
                             id={`cand-row-${cand.id}`}
@@ -2411,7 +2757,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                       if (!editCandName.trim()) return;
                                       const list = getActiveCandidates(editCandCategory);
                                       const updated = list.map(c => c.id === cand.id ? { ...c, name: editCandName.trim(), party: editCandParty.trim() || c.party } : c);
-                                      saveActiveCandidates(editCandCategory, updated);
+                                      handleSaveActiveCandidates(editCandCategory, updated);
                                       setEditCandId(null);
                                       setCandidateUpdateTrigger(prev => prev + 1);
                                       showNotification("Alterações salvas!", "success");
@@ -2431,9 +2777,76 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                               </div>
                             ) : (
                               <>
-                                <div className="space-y-1">
-                                  <span className="text-xs font-bold text-white block">{cand.name}</span>
-                                  <span className="text-[10px] text-gray-500 font-mono block">Partido: {cand.party || "S/P"}</span>
+                                <div className="flex items-center gap-3">
+                                  {/* Circular Candidate Photo Frame */}
+                                  <div className="relative group shrink-0">
+                                    {(cand as any).photo ? (
+                                      <img
+                                        src={(cand as any).photo}
+                                        alt={cand.name}
+                                        className="w-11 h-11 rounded-full object-cover border-2 border-blue-500/30 shadow-lg"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    ) : (
+                                      <div className="w-11 h-11 rounded-full bg-[#181a25] border-2 border-[#222435] flex items-center justify-center text-xs font-mono font-black text-gray-400">
+                                        {cand.name.substring(0, 2).toUpperCase()}
+                                      </div>
+                                    )}
+                                    {/* Upload Button overlay on hover or small click icon */}
+                                    <label className="absolute inset-0 bg-black/65 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                      <span className="text-[8px] text-white font-mono font-bold uppercase tracking-tighter text-center px-1">Foto</span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            const reader = new FileReader();
+                                            reader.onload = async (uploadEvent) => {
+                                              const base64 = uploadEvent.target?.result as string;
+                                              const optimized = await optimizeBase64Image(base64, 96, 96);
+                                              const list = getActiveCandidates(editCandCategory);
+                                              const updated = list.map(c => c.id === cand.id ? { ...c, photo: optimized } : c);
+                                              handleSaveActiveCandidates(editCandCategory, updated);
+                                              setCandidateUpdateTrigger(prev => prev + 1);
+                                              showNotification(`Foto de ${cand.name} atualizada!`, "success");
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
+                                  
+                                  <div className="space-y-0.5 text-left">
+                                    <span className="text-xs font-bold text-white block leading-tight">{cand.name}</span>
+                                    <span className="text-[10px] text-gray-505 font-mono text-gray-500 block leading-none">Partido: {cand.party || "S/P"}</span>
+                                    <label className="text-[9px] text-[#3b82f6] hover:underline cursor-pointer block font-mono mt-1">
+                                      Alterar Foto…
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            const reader = new FileReader();
+                                            reader.onload = async (uploadEvent) => {
+                                              const base64 = uploadEvent.target?.result as string;
+                                              const optimized = await optimizeBase64Image(base64, 96, 96);
+                                              const list = getActiveCandidates(editCandCategory);
+                                              const updated = list.map(c => c.id === cand.id ? { ...c, photo: optimized } : c);
+                                              handleSaveActiveCandidates(editCandCategory, updated);
+                                              setCandidateUpdateTrigger(prev => prev + 1);
+                                              showNotification(`Foto de ${cand.name} atualizada!`, "success");
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
@@ -2450,13 +2863,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   <button
                                     id={`cand-action-del-${cand.id}`}
                                     onClick={() => {
-                                      if (window.confirm(`Excluir permanentemente o pré-candidato ${cand.name}?`)) {
-                                        const list = getActiveCandidates(editCandCategory);
-                                        const updated = list.filter(c => c.id !== cand.id);
-                                        saveActiveCandidates(editCandCategory, updated);
-                                        setCandidateUpdateTrigger(prev => prev + 1);
-                                        showNotification("Candidato removido!", "warning");
-                                      }
+                                      setDeleteCandidateTarget({ id: cand.id, name: cand.name, category: editCandCategory });
                                     }}
                                     className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[10px] font-bold font-mono rounded cursor-pointer transition-colors"
                                   >
@@ -2682,12 +3089,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                               <button
                                 id={`quest-action-del-${quest.key}`}
                                 onClick={() => {
-                                  if (window.confirm(`Excluir permanentemente a pergunta ${quest.key}?`)) {
-                                    const updated = questionsList.filter(q => q.key !== quest.key);
-                                    saveActiveQuestions(updated);
-                                    setQuestionsList(updated);
-                                    showNotification("Pergunta excluída!", "warning");
-                                  }
+                                  setDeleteQuestionTarget({ key: quest.key, title: quest.title });
                                 }}
                                 className="text-red-400 hover:underline cursor-pointer"
                               >
@@ -2754,7 +3156,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               }`}
             >
               <BarChart4 className="h-3.5 w-3.5" />
-              Painel Geral de Votos ({responses.length})
+              Gráfico de votos
             </button>
           </div>
 
@@ -2785,7 +3187,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 className="w-full px-5 py-2.5 bg-[#1c1e27] hover:bg-[#252834] border border-[#2d303f] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <BarChart4 className="h-4 w-4" />
-                Examinar Painel de Resultados
+                Ver gráfico de votos
               </button>
             </div>
           ) : alreadyVoted && surveyStep !== (4 + activeQuestions.length) ? (
@@ -2809,7 +3211,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 className="w-full px-5 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 animate-pulse"
               >
                 <BarChart4 className="h-4 w-4" />
-                Examinar Painel de Resultados
+                Ver gráfico de votos
               </button>
             </div>
           ) : (
@@ -2846,7 +3248,15 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
 
               {/* Step rendering dispatcher */}
               <AnimatePresence mode="wait">
-                {surveyStep === 0 && <WelcomeStep onStart={() => setSurveyStep(1)} />}
+                {surveyStep === 0 && (
+                  <WelcomeStep 
+                    onStart={() => setSurveyStep(1)} 
+                    responses={responses}
+                    setAlreadyVoted={setAlreadyVoted}
+                    clientIpHash={clientIpHash}
+                    setClientIpHash={setClientIpHash}
+                  />
+                )}
 
                 {surveyStep === 1 && (
                   <DemographicsStep
@@ -2889,7 +3299,8 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   };
 
                   const scenarioField = candScenarioMap[question.key] || "presidentScenario";
-                  const candidates = (activePollData as any)[scenarioField]?.candidates || [];
+                  const rawCandidates = (activePollData as any)[scenarioField]?.candidates || [];
+                  const candidates = [...rawCandidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 
                   if (question.category === "senate") {
                     return (
@@ -2929,14 +3340,14 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     income={surveyAnswers.income}
                     color={surveyAnswers.color}
                     religion={surveyAnswers.religion}
-                    votePresidentName={getCandidateName(surveyAnswers.votePresident, "pres")}
-                    votePresidentRunoffName={getCandidateName(surveyAnswers.votePresidentRunoff || "", "presRunoff")}
-                    voteGovernorName={getCandidateName(surveyAnswers.voteGovernor, "gov")}
-                    voteGovernorRunoffName={getCandidateName(surveyAnswers.voteGovernorRunoff || "", "govRunoff")}
-                    voteSenateNames={getCandidateName(surveyAnswers.voteSenate, "sen")}
-                    voteStateDeputyName={getCandidateName(surveyAnswers.voteStateDeputy, "state")}
-                    voteFederalDeputyName={getCandidateName(surveyAnswers.voteFederalDeputy, "fed")}
-                    voteMayorPetropolisName={getCandidateName(surveyAnswers.voteMayorPetropolis || "", "mayor")}
+                    votePresident={getCandidatesInfo(surveyAnswers.votePresident, "pres")}
+                    votePresidentRunoff={getCandidatesInfo(surveyAnswers.votePresidentRunoff || "", "presRunoff")}
+                    voteGovernor={getCandidatesInfo(surveyAnswers.voteGovernor, "gov")}
+                    voteGovernorRunoff={getCandidatesInfo(surveyAnswers.voteGovernorRunoff || "", "govRunoff")}
+                    voteSenate={getCandidatesInfo(surveyAnswers.voteSenate, "sen")}
+                    voteStateDeputy={getCandidatesInfo(surveyAnswers.voteStateDeputy, "state")}
+                    voteFederalDeputy={getCandidatesInfo(surveyAnswers.voteFederalDeputy, "fed")}
+                    voteMayorPetropolis={getCandidatesInfo(surveyAnswers.voteMayorPetropolis || "", "mayor")}
                     onPrev={handlePrevStep}
                     onSubmit={handleSurveySubmit}
                   />
@@ -2973,12 +3384,12 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   <Calendar className="h-6 w-6 animate-pulse" />
                 </div>
                 <div className="space-y-1 text-left">
-                  <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">CRONOGRAMA DO CICLO ATIVO</span>
+                  <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">💬 Como funcionam os Ciclos de Sondagem Rotativos?</span>
                   <p className="text-white text-base font-bold font-sans">
                     Período de Recolhimento da Entrevista: <span className="text-[#3b82f6] font-mono">{getCurrentCycleDates().start} a {getCurrentCycleDates().end}</span>
                   </p>
                   <p className="text-xs text-gray-400">
-                    Os dados sofrem encerramento e consolidação integral a cada 15 dias. Apenas uma participação por dispositivo é autorizada por ciclo para salvaguardar a amostragem de Petrópolis.
+                    Sondagem Automatizada Quinzenal: A cada 15 dias os dados são consolidados e um novo ciclo se inicia de forma limpa, permitindo que os participantes opinem novamente sobre o cenário para máxima precisão temporal.
                   </p>
                 </div>
               </div>
@@ -3253,10 +3664,23 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                               <div className="flex items-center justify-between text-xs">
                                 <div className="flex items-center gap-1.5">
                                   <span className={`w-5 h-5 rounded-md flex items-center justify-center font-mono font-bold text-[10px] ${
-                                    idx === 0 ? "bg-[#3b82f6] text-white" : idx === 1 ? "bg-[#06b6d4] text-white" : "bg-[#1f212c] text-gray-450 text-gray-400"
+                                    idx === 0 ? "bg-[#3b82f6] text-white" : idx === 1 ? "bg-[#06b6d4] text-white" : "bg-[#1f212c] text-gray-400"
                                   }`}>
                                     {idx + 1}
                                   </span>
+                                  {/* Candidate Circular Image */}
+                                  {(cand as any).photo ? (
+                                    <img
+                                      src={(cand as any).photo}
+                                      alt={cand.name}
+                                      className="w-6 h-6 rounded-full object-cover border border-[#1b1c28]"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="w-6 h-6 rounded-full bg-[#1b1c26] border border-[#2b2d39] flex items-center justify-center text-[8px] font-bold text-gray-400 font-mono">
+                                      {cand.name.substring(0, 1).toUpperCase()}
+                                    </div>
+                                  )}
                                   <span className="font-bold text-white text-xs">{cand.name}</span>
                                   <span className="text-[10px] bg-[#1a1c25] border border-gray-800 text-gray-400 font-mono px-1.5 py-0.2 rounded font-semibold uppercase">
                                     {cand.party}
@@ -3929,6 +4353,78 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors"
               >
                 Sim, Limpar Tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal for Deleting Candidate */}
+      {deleteCandidateTarget && (
+        <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-[#0e0f14] border border-red-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2 bg-red-500/10 rounded-xl border border-red-500/20">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold font-display uppercase tracking-wider text-white">Excluir Pré-Candidato?</h3>
+                <p className="text-[10px] text-gray-500 font-mono">Esta ação removerá o candidato da lista de votação</p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-left font-sans text-gray-300">
+              Você está prestes a excluir permanentemente o pré-candidato <strong className="text-white">{deleteCandidateTarget.name}</strong> do cenário de seleção.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setDeleteCandidateTarget(null)}
+                className="px-4 py-2 bg-[#1b1b22] hover:bg-[#22222b] border border-[#2d2d3a] text-gray-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteCandidate}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors"
+              >
+                Sim, Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal for Deleting Question */}
+      {deleteQuestionTarget && (
+        <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-[#0e0f14] border border-red-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2 bg-red-500/10 rounded-xl border border-red-500/20">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold font-display uppercase tracking-wider text-white">Excluir Pergunta?</h3>
+                <p className="text-[10px] text-gray-500 font-mono">Esta ação descarta a pergunta extra</p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-left font-sans text-gray-300">
+              Você está prestes a excluir permanentemente a pergunta <strong className="text-white">{deleteQuestionTarget.key}</strong> ({deleteQuestionTarget.title}).
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setDeleteQuestionTarget(null)}
+                className="px-4 py-2 bg-[#1b1b22] hover:bg-[#22222b] border border-[#2d2d3a] text-gray-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteQuestion}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors"
+              >
+                Sim, Excluir
               </button>
             </div>
           </div>

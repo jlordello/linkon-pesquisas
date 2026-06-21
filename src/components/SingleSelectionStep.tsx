@@ -35,8 +35,8 @@ export const SingleSelectionStep: React.FC<SingleSelectionStepProps> = ({
       className="space-y-6"
     >
       <div>
-        <h3 className="text-base font-bold font-display text-white tracking-wide uppercase">{title}</h3>
-        <p className="text-xs text-gray-400">{subtitle}</p>
+        <h3 className="text-base font-bold font-display text-white tracking-wide uppercase break-words whitespace-normal leading-snug">{title}</h3>
+        <p className="text-xs text-gray-400 break-words whitespace-normal leading-normal">{subtitle}</p>
       </div>
 
       <div className="space-y-2.5 max-h-[355px] overflow-y-auto pr-2 custom-scrollbar">
@@ -51,13 +51,22 @@ export const SingleSelectionStep: React.FC<SingleSelectionStepProps> = ({
                 : "bg-[#111218] border-[#1e2029] text-gray-300 hover:border-gray-500"
             }`}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-650 flex items-center justify-center font-bold text-xs text-white">
-                {cand.name[0]}
-              </div>
-              <div>
-                <p className="text-xs font-bold text-white">{cand.name}</p>
-                <span className="text-[10px] text-gray-400 font-mono">Partido: {cand.party}</span>
+            <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
+              {cand.photo ? (
+                <img
+                  src={cand.photo}
+                  alt={cand.name}
+                  className="w-8 h-8 rounded-full object-cover border border-[#1e2029] shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-650 flex items-center justify-center font-bold text-xs text-white shrink-0">
+                  {cand.name[0]}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-white break-words whitespace-normal leading-snug">{cand.name}</p>
+                <span className="text-[10px] text-gray-400 font-mono block break-words whitespace-normal">Partido: {cand.party}</span>
               </div>
             </div>
             <span className="text-[9px] font-mono border border-gray-800 px-2 py-0.5 rounded text-gray-500 uppercase">Estimulada</span>

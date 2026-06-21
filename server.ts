@@ -48,9 +48,8 @@ app.post("/api/gemini/suggest-candidates", async (req, res) => {
         }
       });
       
-      const sorted = Object.entries(counts)
+      let sorted = Object.entries(counts)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
         .map(([name, count]) => {
           let party = "S/D"; // Sem Partido / Desconhecido
           const matchKey = Object.keys(partyMap).find(k => 
@@ -67,23 +66,12 @@ app.post("/api/gemini/suggest-candidates", async (req, res) => {
           };
         });
 
-      // Guarantee exactly 5 items
-      const defaultCandidates = [
-        { name: "Hingo Hammes", party: "PP", count: 0, analysis: "Liderança do Progressistas em Petrópolis." },
-        { name: "Yuri Moura", party: "PSOL", count: 0, analysis: "Deputado Estadual com forte inserção na oposição municipal." },
-        { name: "Rubens Bomtempo", party: "PSB", count: 0, analysis: "Ex-prefeito histórico de Petrópolis com múltiplas gestões." },
-        { name: "Leandro Sampaio", party: "PODEMOS", count: 0, analysis: "Ex-prefeito de grande recall na região serrana." },
-        { name: "Fred Procópio", party: "MDB", count: 0, analysis: "Vereador e articulador de relevância governamental local." }
-      ];
-
-      while (sorted.length < 5 && defaultCandidates.length > 0) {
-        const nextDefault = defaultCandidates.shift();
-        if (nextDefault && !sorted.some(c => c.name.toLowerCase() === nextDefault.name.toLowerCase())) {
-          sorted.push(nextDefault);
-        }
+      // Show top 5 only if there are more than 5 unique candidate names
+      if (sorted.length > 5) {
+        sorted = sorted.slice(0, 5);
       }
 
-      return { candidates: sorted.slice(0, 5) };
+      return { candidates: sorted };
     };
 
     if (!apiKey) {
@@ -110,7 +98,7 @@ Por favor execute as tarefas a seguir:
 1. Aglutine, corrija ortograficamente e unifique nomes parecidos ou grafados incorretamente por erro de digitação (ex: "yuri", "Yuri Moura", "Iuri Moura" -> "Yuri Moura"; "bom tempo", "Rubens Bomtempo" -> "Rubens Bomtempo").
 2. Conte a frequência exata de ocorrência de cada nome pós aglutinação e organize em ordem decrescente de votos.
 3. Extraia sempre de forma precisa do seu banco de dados de conhecimento o partido político atual ou oficial do candidato citado (ex: Yuri Moura -> PSOL, Rubens Bomtempo -> PSB, Hingo Hammes -> PP, Bernardo Rossi -> MDB, Leandro Sampaio -> PODEMOS, Octavio Sampaio -> PL, etc.). Se não houver partido claro, use "S/P".
-4. Retorne exatamente os 5 nomes mais sugeridos. Se houver menos de 5 nomes descritos nas sugestões, complete a lista com outros pré-candidatos mais comentados do cenário de Petrópolis, RJ (por exemplo: Rubens Bomtempo, Yuri Moura, Hingo Hammes, Bernardo Rossi, Leandro Sampaio, Fred Procópio) até termos exatamente 5 pré-candidatos no retorno.
+4. Retorne APENAS os candidatos unificados correspondentes aos nomes presentes nas sugestões fornecidas. Se houver 5 ou menos nomes únicos sugeridos, NÃO adicione de forma alguma nenhum pré-candidato extra fictício ou padrão para preencher ou completar a lista. Por exemplo, se houver apenas 1 ou 2 sugestões reais e únicas, o retorno final deve conter unicamente esses candidates avaliados. Se e somente se houver mais de 5 nomes únicos reais sugeridos pelo eleitorado nas coletas, aí sim você deve ponderar e retornar apenas os 5 nomes mais sugeridos (os 5 nomes mais pedidos/votados).
 5. Para cada candidato, escreva uma curta análise de 1 frase explicando sua importância política local serrana (se é deputado, prefeito, vereador, etc.).
 
 Retorne os dados estritamente em um objeto JSON válido correspondente ao seguinte esquema de dados:
@@ -184,24 +172,11 @@ Retorne os dados estritamente em um objeto JSON válido correspondente ao seguin
       const resText = response.text || "{}";
       const data = JSON.parse(resText.trim());
       if (data && Array.isArray(data.candidates) && data.candidates.length > 0) {
-        const rawList = data.candidates;
-        
-        const defaultCandidates = [
-          { name: "Hingo Hammes", party: "PP", count: 0, analysis: "Liderança do Progressistas em Petrópolis." },
-          { name: "Yuri Moura", party: "PSOL", count: 0, analysis: "Deputado Estadual com forte inserção na oposição municipal." },
-          { name: "Rubens Bomtempo", party: "PSB", count: 0, analysis: "Ex-prefeito histórico de Petrópolis com múltiplas gestões." },
-          { name: "Leandro Sampaio", party: "PODEMOS", count: 0, analysis: "Ex-prefeito de grande recall na região serrana." },
-          { name: "Fred Procópio", party: "MDB", count: 0, analysis: "Vereador e articulador de relevância governamental local." }
-        ];
-
-        while (rawList.length < 5 && defaultCandidates.length > 0) {
-          const nextDefault = defaultCandidates.shift();
-          if (nextDefault && !rawList.some((c: any) => c.name.toLowerCase() === nextDefault.name.toLowerCase())) {
-            rawList.push(nextDefault);
-          }
+        let rawList = data.candidates;
+        if (rawList.length > 5) {
+          rawList = rawList.slice(0, 5);
         }
-        
-        return res.json({ candidates: rawList.slice(0, 5) });
+        return res.json({ candidates: rawList });
       } else {
         console.log("[Gemini API Info] Retorno estruturado veio vazio. Executando fallback local.");
         return res.json(runLocalFallback());

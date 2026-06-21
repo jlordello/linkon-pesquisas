@@ -65,13 +65,13 @@ export const SenateSelectionStep: React.FC<SenateSelectionStepProps> = ({
       className="space-y-6"
     >
       <div>
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold font-display text-white tracking-wide uppercase">Cenário Senado Federal</h3>
-          <span className="text-[10px] bg-[#3b82f6]/20 text-[#3b82f6] border border-[#3b82f6]/30 font-semibold font-mono tracking-wider px-2 py-0.5 rounded">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 className="text-base font-bold font-display text-white tracking-wide uppercase break-words whitespace-normal leading-snug">Cenário Senado Federal</h3>
+          <span className="text-[10px] bg-[#3b82f6]/20 text-[#3b82f6] border border-[#3b82f6]/30 font-semibold font-mono tracking-wider px-2 py-0.5 rounded self-start sm:self-auto break-words whitespace-normal text-left">
             Selecione 2 nomes ou 1 especial
           </span>
          </div>
-        <p className="text-xs text-gray-400">Você deve preencher duas opções de voto para Senador ou escolher Branco/Nulo/Não Sabe:</p>
+        <p className="text-xs text-gray-400 mt-1 break-words whitespace-normal leading-normal">Você deve preencher duas opções de voto para Senador ou escolher Branco/Nulo/Não Sabe:</p>
       </div>
 
       <div className="space-y-2.5 max-h-[352px] overflow-y-auto pr-2 custom-scrollbar">
@@ -88,17 +88,26 @@ export const SenateSelectionStep: React.FC<SenateSelectionStepProps> = ({
                   : "bg-[#111218] border-[#1e2029] text-gray-300 hover:border-gray-500"
               }`}
             >
-              <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-xs ${
-                  selected 
-                    ? "bg-[#3b82f6] border-[#3b82f6] text-white" 
-                    : "bg-gradient-to-br from-gray-700 to-gray-900 border-gray-650 text-white"
-                }`}>
-                  {selected ? <Check className="h-4 w-4 stroke-[3px]" /> : cand.name[0]}
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-white">{cand.name}</p>
-                  <span className="text-[10px] text-gray-400 font-mono">Partido: {cand.party}</span>
+              <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
+                {selected ? (
+                  <div className="w-8 h-8 rounded-full bg-[#3b82f6] border border-[#3b82f6] text-white flex items-center justify-center font-bold text-xs shrink-0 animate-pulse">
+                    <Check className="h-4 w-4 stroke-[3px]" />
+                  </div>
+                ) : cand.photo ? (
+                  <img
+                    src={cand.photo}
+                    alt={cand.name}
+                    className="w-8 h-8 rounded-full object-cover border border-[#1e2029] shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border-gray-650 flex items-center justify-center font-bold text-xs text-white shrink-0">
+                    {cand.name[0]}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-white break-words whitespace-normal leading-snug">{cand.name}</p>
+                  <span className="text-[10px] text-gray-400 font-mono block break-words whitespace-normal">Partido: {cand.party}</span>
                 </div>
               </div>
               <span className={`text-[9px] font-mono border px-2 py-0.5 rounded font-bold uppercase ${

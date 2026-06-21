@@ -83,7 +83,7 @@ export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashb
             className="px-6 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 transition-all font-mono tracking-wide uppercase"
           >
             <BarChart4 className="h-4 w-4" />
-            Ver Painel Geral de Votos
+            Ver gráfico de votos
           </button>
         </div>
       )}

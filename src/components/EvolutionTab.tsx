@@ -21,14 +21,14 @@ import {
   ArrowDownRight 
 } from "lucide-react";
 import { motion } from "motion/react";
-import { SurveyResponse, getCurrentCycleDates } from "../types";
+import { SurveyResponse, getCurrentCycleDates, getActiveCandidates } from "../types";
 
 interface EvolutionTabProps {
   isAdmin: boolean;
   responses?: SurveyResponse[];
 }
 
-type OfficeType = "president" | "governor" | "stateDeputy" | "federalDeputy" | "mayor";
+type OfficeType = "president" | "governor" | "senate" | "stateDeputy" | "federalDeputy" | "mayor";
 
 interface HistoricalDataPoint {
   cycle: string;
@@ -36,78 +36,144 @@ interface HistoricalDataPoint {
   [candidateName: string]: number | string; // percentage values
 }
 
-// Complete candidates config mapped directly with their DB IDs
-const CANDIDATE_OFFICES = {
-  president: {
-    title: "Presidente",
-    candidates: [
-      { id: "pres-lula", name: "Lula", party: "PT", color: "#ef4444" },
-      { id: "pres-flavio", name: "Flávio Bolsonaro", party: "PL", color: "#3b82f6" },
-      { id: "pres-caiado", name: "Ronaldo Caiado", party: "PSD", color: "#10b981" },
-      { id: "pres-zema", name: "Romeu Zema", party: "NOVO", color: "#f59e0b" },
-      { id: "pres-renan", name: "Renan Santos", party: "Missão", color: "#8b5cf6" },
-      { id: "pres-daciolo", name: "Cabo Daciolo", party: "Mobiliza", color: "#ec4899" },
-      { id: "pres-samara", name: "Samara Martins", party: "UP", color: "#6b7280" }
-    ],
-    fieldKey: "votePresident"
-  },
-  governor: {
-    title: "Governador",
-    candidates: [
-      { id: "gov-paes", name: "Eduardo Paes", party: "PSD", color: "#ef4444" },
-      { id: "gov-ruas", name: "Douglas Ruas", party: "PL", color: "#3b82f6" },
-      { id: "gov-luizinho", name: "Dr. Luizinho", party: "PP", color: "#10b981" },
-      { id: "gov-reis", name: "Washington Reis", party: "MDB", color: "#a855f7" },
-      { id: "gov-marinho", name: "André Marinho", party: "NOVO", color: "#f59e0b" },
-      { id: "gov-siri", name: "William Siri", party: "PSOL", color: "#ec4899" },
-      { id: "gov-amorim", name: "Rodrigo Amorim", party: "União", color: "#06b6d4" }
-    ],
-    fieldKey: "voteGovernor"
-  },
-  stateDeputy: {
-    title: "Deputado Estadual (Região Serrana)",
-    candidates: [
-      { id: "est-yuri", name: "Yuri Moura", party: "PSOL", color: "#3b82f6" },
-      { id: "est-fred", name: "Fred Procópio", party: "MDB", color: "#10b981" },
-      { id: "est-octavio", name: "Octávio Sampaio", party: "PL", color: "#ec4899" },
-      { id: "est-junior", name: "Junior Paixão", party: "PSDB", color: "#06b6d4" },
-      { id: "est-paulo", name: "Paulo Mustrangi", party: "PT", color: "#ef4444" },
-      { id: "est-gilda", name: "Gilda Beatriz", party: "PP", color: "#f59e0b" },
-      { id: "est-eduardo", name: "Eduardo do blog", party: "PSD", color: "#8b5cf6" },
-      { id: "est-rodrigo", name: "Rodrigo Amorim", party: "União", color: "#14b8a6" },
-      { id: "est-renata", name: "Renata Souza", party: "PSOL", color: "#a855f7" },
-      { id: "est-sergio", name: "Sergio Fernandes", party: "PSD", color: "#6366f1" },
-      { id: "est-leonardo", name: "Leonardo França", party: "PT", color: "#f43f5e" },
-      { id: "est-dani", name: "Dani Balbi", party: "PCdoB", color: "#d946ef" }
-    ],
-    fieldKey: "voteStateDeputy"
-  },
-  federalDeputy: {
-    title: "Deputado Federal",
-    candidates: [
-      { id: "fed-lindbergh", name: "Lindbergh Farias", party: "PT", color: "#ef4444" },
-      { id: "fed-reimont", name: "Reimont", party: "PT", color: "#f43f5e" },
-      { id: "fed-helio", name: "Helio Lopes", party: "PL", color: "#3b82f6" },
-      { id: "fed-daniela", name: "Daniela do Waguinho", party: "União Brasil", color: "#06b6d4" },
-      { id: "fed-luizinho", name: "Dr. Luizinho", party: "PP", color: "#10b981" },
-      { id: "fed-hugo", name: "Hugo Leal", party: "PSD", color: "#f59e0b" },
-      { id: "fed-bernardo", name: "Bernardo Rossi", party: "União Brasil", color: "#a855f7" },
-      { id: "fed-rubens", name: "Rubens Bomtempo", party: "PT", color: "#8b5cf6" },
-      { id: "fed-leandro", name: "Leandro Azevedo", party: "Republicanos", color: "#6b7280" }
-    ],
-    fieldKey: "voteFederalDeputy"
-  },
-  mayor: {
-    title: "Prefeito de Petrópolis",
-    candidates: [
-      { id: "may-hingo", name: "Hingo Hammes", party: "PP", color: "#60a5fa" },
-      { id: "may-yuri", name: "Yuri Moura", party: "PSOL", color: "#f59e0b" },
-      { id: "may-paulo", name: "Paulo Mustrangi", party: "PT", color: "#ef4444" },
-      { id: "may-rubens", name: "Rubens Bomtempo", party: "PT", color: "#10b981" },
-      { id: "may-eduardo", name: "Eduardo do Blog", party: "Republicanos", color: "#8b5cf6" }
-    ],
-    fieldKey: "voteMayorPetropolis"
+const OFFICE_METADATA = {
+  president: { title: "Presidente", fieldKey: "votePresident" },
+  governor: { title: "Governador", fieldKey: "voteGovernor" },
+  senate: { title: "Senador da República", fieldKey: "voteSenate" },
+  stateDeputy: { title: "Deputado Estadual (Região Serrana)", fieldKey: "voteStateDeputy" },
+  federalDeputy: { title: "Deputado Federal", fieldKey: "voteFederalDeputy" },
+  mayor: { title: "Prefeito de Petrópolis", fieldKey: "voteMayorPetropolis" }
+};
+
+const WELL_KNOWN_COLORS: Record<string, string> = {
+  "pres-lula": "#ef4444",
+  "pres-flavio": "#3b82f6",
+  "pres-caiado": "#10b981",
+  "pres-zema": "#f59e0b",
+  "pres-renan": "#8b5cf6",
+  "pres-daciolo": "#ec4899",
+  "pres-samara": "#6b7280",
+  "gov-paes": "#ef4444",
+  "gov-ruas": "#3b82f6",
+  "gov-luizinho": "#10b981",
+  "gov-reis": "#a855f7",
+  "gov-marinho": "#f59e0b",
+  "gov-siri": "#ec4899",
+  "gov-amorim": "#06b6d4",
+  "est-yuri": "#3b82f6",
+  "est-fred": "#10b981",
+  "est-octavio": "#ec4899",
+  "est-junior": "#06b6d4",
+  "est-paulo": "#ef4444",
+  "est-gilda": "#f59e0b",
+  "est-eduardo": "#8b5cf6",
+  "est-rodrigo": "#14b8a6",
+  "est-renata": "#a855f7",
+  "est-sergio": "#6366f1",
+  "est-leonardo": "#f43f5e",
+  "est-dani": "#d946ef",
+  "may-hingo": "#60a5fa",
+  "may-yuri": "#f59e0b",
+  "may-paulo": "#ef4444",
+  "may-rubens": "#10b981",
+  "may-eduardo": "#8b5cf6"
+};
+
+const PALETTE = [
+  "#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", 
+  "#ec4899", "#06b6d4", "#f43f5e", "#a855f7", "#14b8a6", 
+  "#6366f1", "#d946ef", "#0284c7", "#f97316", "#84cc16"
+];
+
+function getCandidateColor(id: string, index: number): string {
+  if (WELL_KNOWN_COLORS[id]) return WELL_KNOWN_COLORS[id];
+  return PALETTE[index % PALETTE.length];
+}
+
+interface CustomizedLineDotProps {
+  cx?: number;
+  cy?: number;
+  cand: any;
+}
+
+const CustomizedLineDot: React.FC<CustomizedLineDotProps> = (props) => {
+  const { cx, cy, cand } = props;
+  if (cx === undefined || cy === undefined) return null;
+
+  if (cand.photo) {
+    const clipId = `clip-${(cand.id || cand.name).replace(/[^a-zA-Z0-9]/g, "-")}-${Math.round(cx)}-${Math.round(cy)}`;
+    return (
+      <g>
+        <defs>
+          <clipPath id={clipId}>
+            <circle cx={cx} cy={cy} r={10} />
+          </clipPath>
+        </defs>
+        <circle cx={cx} cy={cy} r={12} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={10} fill="#111218" />
+        <image
+          x={cx - 10}
+          y={cy - 10}
+          width={20}
+          height={20}
+          href={cand.photo}
+          clipPath={`url(#${clipId})`}
+          preserveAspectRatio="xMidYMid slice"
+        />
+      </g>
+    );
   }
+
+  return (
+    <circle 
+      cx={cx} 
+      cy={cy} 
+      r={5} 
+      fill={cand.color || "#3b82f6"} 
+      stroke="#ffffff" 
+      strokeWidth={1.5} 
+    />
+  );
+};
+
+const CustomizedActiveDot: React.FC<CustomizedLineDotProps> = (props) => {
+  const { cx, cy, cand } = props;
+  if (cx === undefined || cy === undefined) return null;
+
+  if (cand.photo) {
+    const clipId = `clip-active-${(cand.id || cand.name).replace(/[^a-zA-Z0-9]/g, "-")}-${Math.round(cx)}-${Math.round(cy)}`;
+    return (
+      <g>
+        <defs>
+          <clipPath id={clipId}>
+            <circle cx={cx} cy={cy} r={13} />
+          </clipPath>
+        </defs>
+        <circle cx={cx} cy={cy} r={16} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={2} />
+        <circle cx={cx} cy={cy} r={13} fill="#111218" />
+        <image
+          x={cx - 13}
+          y={cy - 13}
+          width={26}
+          height={26}
+          href={cand.photo}
+          clipPath={`url(#${clipId})`}
+          preserveAspectRatio="xMidYMid slice"
+        />
+      </g>
+    );
+  }
+
+  return (
+    <circle 
+      cx={cx} 
+      cy={cy} 
+      r={7} 
+      fill={cand.color || "#3b82f6"} 
+      stroke="#ffffff" 
+      strokeWidth={2} 
+    />
+  );
 };
 
 export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses = [] }) => {
@@ -122,23 +188,31 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
 
     const result: Record<OfficeType, {
       title: string;
-      candidates: { name: string; party: string; color: string; id: string }[];
+      candidates: { name: string; party: string; color: string; id: string; photo?: string }[];
       data: HistoricalDataPoint[];
     }> = {} as any;
 
-    (Object.keys(CANDIDATE_OFFICES) as OfficeType[]).forEach((officeKey) => {
-      const officeInfo = CANDIDATE_OFFICES[officeKey];
+    (Object.keys(OFFICE_METADATA) as OfficeType[]).forEach((officeKey) => {
+      const officeInfo = OFFICE_METADATA[officeKey];
       const field = officeInfo.fieldKey;
+
+      const activeCandidatesFromDb = getActiveCandidates(officeKey);
 
       // Count votes in current database
       const voteCounts: Record<string, number> = {};
-      officeInfo.candidates.forEach((cand) => {
+      activeCandidatesFromDb.forEach((cand) => {
         voteCounts[cand.id] = 0;
       });
 
       responses.forEach((resp) => {
         const val = resp[field as keyof SurveyResponse];
-        if (typeof val === "string") {
+        if (Array.isArray(val)) {
+          val.forEach((v) => {
+            if (typeof v === "string" && voteCounts[v] !== undefined) {
+              voteCounts[v]++;
+            }
+          });
+        } else if (typeof val === "string") {
           if (voteCounts[val] !== undefined) {
             voteCounts[val]++;
           }
@@ -146,10 +220,18 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
       });
 
       // Compute actual percentage score
-      const scoredCandidates = officeInfo.candidates.map((cand) => {
+      const scoredCandidates = activeCandidatesFromDb.map((cand, index) => {
         const count = voteCounts[cand.id] || 0;
         const currentPct = total > 0 ? parseFloat(((count / total) * 100).toFixed(1)) : 0;
-        return { ...cand, currentPct };
+        const color = getCandidateColor(cand.id, index);
+        return { 
+          id: cand.id,
+          name: cand.name, 
+          party: cand.party, 
+          color: (cand as any).color || color,
+          photo: (cand as any).photo,
+          currentPct 
+        };
       });
 
       // Display all candidate profiles in the evolution chart as requested
@@ -180,7 +262,8 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
           name: c.name,
           party: c.party,
           color: c.color,
-          id: c.id
+          id: c.id,
+          photo: c.photo
         })),
         data: [cycle1]
       };
@@ -266,42 +349,6 @@ Dados consolidados quinzenalmente.
         </div>
       </div>
 
-      {/* METODOLOGIA DOS CICLOS EXPLICADA */}
-      <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-5 space-y-4">
-        <div className="flex items-start gap-3 border-b border-[#1b1c23] pb-3">
-          <div className="p-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[#3b82f6] shrink-0">
-            <Info className="h-4 w-4" />
-          </div>
-          <div className="text-left">
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">Como funcionam os Ciclos de Sondagem Rotativos?</h4>
-            <p className="text-[11px] text-gray-400">Metodologia oficial para controle de amostragens do Instituto Linkon.</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left">
-          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
-            <h5 className="text-[11px] font-bold text-blue-400 uppercase tracking-widest font-mono">1. Período de 15 Dias</h5>
-            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
-              As coletas de campo e entrevistas ficam sob vigência por exatos 15 days. Todos os entrevistados na região de Petrópolis acumulam-se e compõem a amostragem real e ativa do ciclo corrente.
-            </p>
-          </div>
-
-          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
-            <h5 className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest font-mono">2. Dados 100% Reais</h5>
-            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
-              Cada ponto do gráfico representa a expressão direta de eleitores reais. Não há estimativa de IA ou simulação automatizada nas apurações correntes: a evolução amostral é fidedigna e baseada unicamente nas urnas de opinião coletadas.
-            </p>
-          </div>
-
-          <div className="bg-[#08090d] border border-[#171822] p-4 rounded-xl space-y-1">
-            <h5 className="text-[11px] font-bold text-purple-400 uppercase tracking-widest font-mono">3. Liberação de Dispositivos</h5>
-            <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
-              Apenas um voto por dispositivo é autorizado por ciclo de campo. Ao iniciar uma nova roda quinzenal, o sistema limpa o banco anterior, de modo a liberar os dispositivos de forma transparente para permitir nova participação real.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Office Selector Filters row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:flex bg-[#0a0a0f] p-1.5 border border-[#1e202e] rounded-2xl gap-1.5 w-full md:w-max">
         {(Object.keys(computedEvolutionData) as OfficeType[]).map((officeKey) => (
@@ -383,8 +430,8 @@ Dados consolidados quinzenalmente.
                   name={`${cand.name} (${cand.party})`}
                   stroke={cand.color}
                   strokeWidth={3}
-                  activeDot={{ r: 6 }}
-                  dot={{ strokeWidth: 2, r: 4 }}
+                  activeDot={<CustomizedActiveDot cand={cand} />}
+                  dot={<CustomizedLineDot cand={cand} />}
                 />
               ))}
             </LineChart>
@@ -440,8 +487,23 @@ Dados consolidados quinzenalmente.
                   return (
                     <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
                       <td className="py-3 px-4 font-extrabold text-white flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cand.color }} />
-                        {cand.name} <span className="text-gray-500 font-normal font-mono text-[10px]">({cand.party})</span>
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cand.color }} />
+                        {cand.photo ? (
+                          <img 
+                            src={cand.photo} 
+                            alt={cand.name} 
+                            className="w-7 h-7 rounded-full object-cover border border-[#1f212a] shrink-0" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-7 h-7 rounded-full bg-[#161821] border border-[#2b2d3c] flex items-center justify-center text-[9px] font-mono font-bold text-gray-400 shrink-0">
+                            {cand.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex flex-col text-left">
+                          <span className="text-white text-xs font-bold leading-tight">{cand.name}</span>
+                          <span className="text-gray-500 font-normal font-mono text-[10px] leading-none mt-0.5">{cand.party}</span>
+                        </div>
                       </td>
                       {scenario.data.map((d, index) => (
                         <td key={index} className="py-3 px-4 font-mono font-bold text-gray-300">

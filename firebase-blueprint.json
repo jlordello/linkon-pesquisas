@@ -136,6 +136,36 @@
         "color",
         "religion"
       ]
+    },
+    "CandidatesConfig": {
+      "title": "CandidatesConfig",
+      "description": "Configuration list of active candidates per ballot category",
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string",
+          "description": "The category identifier (e.g. president, governor, senate, stateDeputy, federalDeputy, mayor)"
+        },
+        "candidates": {
+          "type": "array",
+          "description": "List of candidates, including names, parties, photos, and colors",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "party": { "type": "string" },
+              "photo": { "type": "string" },
+              "color": { "type": "string" }
+            },
+            "required": ["id", "name", "party"]
+          }
+        }
+      },
+      "required": [
+        "category",
+        "candidates"
+      ]
     }
   },
   "firestore": {
@@ -146,6 +176,10 @@
     "suggestions": {
       "schema": "#/entities/CandidateSuggestion",
       "description": "Collection of open text pre-candidate suggestions submitted directly by visitors"
+    },
+    "candidates_config": {
+      "schema": "#/entities/CandidatesConfig",
+      "description": "Configuration containing the user configured list of candidates per election category"
     }
   }
 }

@@ -11,15 +11,25 @@ import {
   Loader2 
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { getNextCycleStartDate } from "../types";
+import { 
+  getNextCycleStartDate, 
+  SurveyResponse, 
+  sha256, 
+  getCurrentCycleDates, 
+  getCycleKeyForTimestamp 
+} from "../types";
 
 interface WelcomeStepProps {
   onStart: () => void;
+  responses: SurveyResponse[];
+  setAlreadyVoted: (voted: boolean) => void;
+  clientIpHash: string;
+  setClientIpHash: (hash: string) => void;
 }
 
 const PETROPOLIS_LAT = -22.5112;
 const PETROPOLIS_LON = -43.1779;
-const MAX_ALLOWED_DISTANCE_KM = 55; // 55 km buffer covers all Petrópolis districts
+const MAX_ALLOWED_DISTANCE_KM = 27; // Tightened from 35 km to 27 km to cover the extreme edges of Petrópolis districts (Posse/Secretário) and strictly block adjacent municipalities
 
 // Haversine distance calculator
 function getDistanceInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -38,7 +48,13 @@ function getDistanceInKm(lat1: number, lon1: number, lat2: number, lon2: number)
 
 type CheckState = "initial" | "checking" | "success" | "error";
 
-export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
+export const WelcomeStep: React.FC<WelcomeStepProps> = ({ 
+  onStart, 
+  responses, 
+  setAlreadyVoted, 
+  clientIpHash, 
+  setClientIpHash 
+}) => {
   const [status, setStatus] = useState<CheckState>("initial");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [distance, setDistance] = useState<number | null>(null);
@@ -51,34 +67,125 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
   React.useEffect(() => {
     const detectVpn = async () => {
       try {
-        const res = await fetch("https://ip-api.com/json/?fields=status,message,countryCode,city,isp,org,as,proxy,hosting,mobile,query");
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.status === "success") {
-            const isp = (data.isp || "").toLowerCase();
-            const org = (data.org || "").toLowerCase();
-            const as = (data.as || "").toLowerCase();
-            
-            const isProxy = data.proxy === true;
-            const isHosting = data.hosting === true;
+        // Query BOTH ip-api.com and freeipapi.app in parallel for redundant, robust checks
+        // We restore direct query flags for 'proxy' and 'hosting' to detect datacenter routes
+        const [ipApiRes, freeIpRes] = await Promise.allSettled([
+          fetch("https://ip-api.com/json/?fields=status,message,countryCode,region,city,isp,org,as,proxy,hosting,query"),
+          fetch("https://freeipapi.app/api/json")
+        ]);
 
-            const hostingKeywords = [
-              "vpn", "proxy", "hosting", "server", "servers", "datacenter", "data center",
-              "cloud", "digitalocean", "linode", "ovh", "hetzner", "google llc", "amazon",
-              "microsoft", "cloudflare", "fastly", "vultr", "m247", "choopa", "kamatera",
-              "contabo", "interserver", "girasol", "prowritingaid", "tortrust", "tor-exit",
-              "private internet", "nordvpn", "expressvpn", "surfshark", "vpn-node"
-            ];
+        let vpnFound = false;
+        let details = "";
+        let detectedIp = "";
 
-            const matchesKeyword = hostingKeywords.some(keyword => 
-              isp.includes(keyword) || org.includes(keyword) || as.includes(keyword)
-            );
+        // Process ip-api.com results
+        if (ipApiRes.status === "fulfilled" && ipApiRes.value.ok) {
+          try {
+            const data = await ipApiRes.value.json();
+            if (data && data.status === "success") {
+              const countryCode = data.countryCode || "";
+              const region = data.region || ""; // e.g. "RJ"
+              const isp = (data.isp || "").toLowerCase();
+              const org = (data.org || "").toLowerCase();
+              const as = (data.as || "").toLowerCase();
+              const isProxyField = data.proxy === true;
+              const isHostingField = data.hosting === true;
+              detectedIp = data.query || "";
 
-            if (isProxy || isHosting || matchesKeyword) {
-              setIsVpn(true);
-              setVpnDetails(data.isp || data.org || "Serviço de Nuvem/VPN");
+              // 1. Mandatory country check (Must be Brazil)
+              if (countryCode && countryCode !== "BR") {
+                vpnFound = true;
+                details = `Acesso Bloqueado: Conexão detectada fora do Brasil (${countryCode}). Apenas eleitores residentes no Brasil podem participar.`;
+              }
+
+              // 2. Strict region check: Must be Rio de Janeiro (RJ) to participate in Petrópolis poll
+              if (countryCode === "BR" && region && region !== "RJ" && region !== "Rio de Janeiro") {
+                vpnFound = true;
+                details = `Acesso Bloqueado: Conexão fora do estado do Rio de Janeiro (${region}). Esta sondagem é restrita a moradores do município de Petrópolis (RJ).`;
+              }
+
+              // 3. Direct proxy / hosting checks
+              if (isProxyField) {
+                vpnFound = true;
+                details = "Filtro ativo de Segurança: Proxy de Rede Detectado (Conexão mascarada bloqueada)";
+              }
+              if (isHostingField) {
+                vpnFound = true;
+                details = "Filtro ativo de Segurança: Servidor de Hospedagem / VPN Comercial Detectado";
+              }
+
+              // Keyword checking for VPNs/Hosting
+              const hostingKeywords = [
+                "vpn", "proxy", "hosting", "server", "servers", "datacenter", "data center",
+                "cloud", "digitalocean", "linode", "ovh", "hetzner", "google llc", "amazon",
+                "microsoft", "cloudflare", "fastly", "vultr", "m247", "choopa", "kamatera",
+                "contabo", "interserver", "girasol", "prowritingaid", "tortrust", "tor-exit",
+                "private internet", "nordvpn", "expressvpn", "surfshark", "vpn-node", "ghostvpn",
+                "proton", "windscribe", "mullvad", "tunnelbear", "colocation", "subnet", "smartproxy",
+                "packet", "hostinger", "locaweb", "kinghost", "uol host", "redecidades", "telesmart",
+                "oracle", "heroku", "vercel", "netlify", "aws", "gcp", "azure"
+              ];
+
+              const matchesKeyword = hostingKeywords.some(keyword => 
+                isp.includes(keyword) || org.includes(keyword) || as.includes(keyword)
+              );
+
+              if (matchesKeyword && !vpnFound) {
+                vpnFound = true;
+                details = `${data.isp || data.org || "VPN ou Cloud"} (Rede hospedada ou tunelada de segurança bloqueada)`;
+              }
             }
+          } catch (e) {
+            console.warn("ip-api JSON parse failed:", e);
           }
+        }
+
+        // Process freeipapi.app results as secondary layer or backup
+        if (freeIpRes.status === "fulfilled" && freeIpRes.value.ok) {
+          try {
+            const data = await freeIpRes.value.json();
+            if (data) {
+              const countryCode = data.countryCode || "";
+              const isProxy = data.isProxy === true;
+              if (!detectedIp) {
+                detectedIp = data.ipAddress || "";
+              }
+
+              if (countryCode && countryCode !== "BR") {
+                vpnFound = true;
+                details = `Acesso Bloqueado: Conexão internacional detectada via backup (${countryCode})`;
+              }
+
+              if (isProxy) {
+                vpnFound = true;
+                details = "Filtro ativo de Segurança de Proxy ou Túnel VPN Detectado via Backup";
+              }
+            }
+          } catch (e) {
+            console.warn("freeipapi JSON parse failed:", e);
+          }
+        }
+
+        // Securely hash IP address and cross-reference browser locks
+        if (detectedIp) {
+          const hashVal = await sha256(detectedIp);
+          setClientIpHash(hashVal);
+          
+          // Verify if this IP address has already voted in this cycle
+          const currentCycle = getCurrentCycleDates();
+          const hasVotedIP = responses.some(r => 
+            (r.ipHash === hashVal || r.ipHash === detectedIp) && 
+            getCycleKeyForTimestamp(r.timestamp) === currentCycle.key
+          );
+          
+          if (hasVotedIP) {
+            setAlreadyVoted(true);
+          }
+        }
+
+        if (vpnFound) {
+          setIsVpn(true);
+          setVpnDetails(details || "Rede de Segurança Virtual (VPN/Proxy/Hospedagem)");
         }
       } catch (err) {
         console.error("Erro detectando VPN:", err);
@@ -123,21 +230,105 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({ onStart }) => {
 
     // Call geolocation in background but wait for visual simulation to finish complete check
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
         const dist = getDistanceInKm(latitude, longitude, PETROPOLIS_LAT, PETROPOLIS_LON);
         
+        let isInsideCityBounds = true;
+        let cityResolvedName = "";
+        let isDefinitivelyPetropolis = false;
+        let isDefinitivelyAdjacent = false;
+
+        try {
+          const geoRes = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=13&addressdetails=1`,
+            {
+              headers: {
+                "User-Agent": "InstitutoLinkonPesquisas/1.0 (cjeancarlos2623@gmail.com)"
+              }
+            }
+          );
+          if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            if (geoData && geoData.address) {
+              const addr = geoData.address;
+              
+              const cityVal = (addr.city || "").toLowerCase();
+              const townVal = (addr.town || "").toLowerCase();
+              const municipalityVal = (addr.municipality || "").toLowerCase();
+              const villageVal = (addr.village || "").toLowerCase();
+              const countyVal = (addr.county || "").toLowerCase();
+              const suburbVal = (addr.suburb || "").toLowerCase();
+              const neighbourhoodVal = (addr.neighbourhood || "").toLowerCase();
+              
+              cityResolvedName = addr.city || addr.town || addr.municipality || addr.suburb || addr.neighbourhood || "município adjacente";
+              
+              // Validate if it is definitively Petrópolis
+              const matchesPetropolis = [cityVal, townVal, municipalityVal, villageVal, countyVal, suburbVal, neighbourhoodVal]
+                .some(val => val.includes("petrópolis") || val.includes("petropolis"));
+              
+              // Define adjacent cities to block explicitly
+              const adjacentList = [
+                "magé", "mage", "duque de caxias", "guapimirim", "teresópolis", "teresopolis",
+                "são josé do vale", "sao jose do vale", "areal", "paraíba do sul", "paraiba do sul",
+                "paty do alferes", "miguel pereira", "rio de janeiro"
+              ];
+              
+              const isMainAdjacent = adjacentList.some(blocked => 
+                cityVal.includes(blocked) || 
+                townVal.includes(blocked) || 
+                municipalityVal.includes(blocked) || 
+                villageVal.includes(blocked) ||
+                countyVal.includes(blocked)
+              );
+              
+              if (matchesPetropolis && !isMainAdjacent) {
+                isDefinitivelyPetropolis = true;
+                isInsideCityBounds = true;
+              } else if (isMainAdjacent) {
+                isDefinitivelyAdjacent = true;
+                isInsideCityBounds = false;
+              } else {
+                // Fallback simpler string checking
+                const adrStr = JSON.stringify(addr).toLowerCase();
+                isInsideCityBounds = adrStr.includes("petrópolis") || adrStr.includes("petropolis");
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Erro na geolocalização reversa, usando raio tradicional como fallback:", e);
+        }
+
         setTimeout(() => {
           setDistance(dist);
-          if (dist <= MAX_ALLOWED_DISTANCE_KM) {
+          
+          let allowed = false;
+          let boundaryError = "";
+
+          if (isDefinitivelyPetropolis) {
+            // High-precision administrative match allows them even if extreme coordinates (e.g., Secretário/Posse) exceed general distance limits
+            allowed = true;
+          } else if (isDefinitivelyAdjacent) {
+            allowed = false;
+            boundaryError = `Acesso Bloqueado: Seu dispositivo está em ${cityResolvedName}. Esta sondagem é restrita a moradores de Petrópolis (seus vizinhos como Magé/Caxias não estão elegíveis).`;
+          } else {
+            // Fallback to traditional Haversine distance bounds
+            if (isInsideCityBounds && dist <= MAX_ALLOWED_DISTANCE_KM) {
+              allowed = true;
+            } else if (!isInsideCityBounds) {
+              boundaryError = `Acesso Bloqueado: Seu dispositivo está localizado em outro município vizinho (${cityResolvedName}) e não em Petrópolis. Esta sondagem é restrita a moradores de Petrópolis.`;
+            } else {
+              boundaryError = `Você está fora do município de Petrópolis. Distância calculada: ${dist} km (limite: ${MAX_ALLOWED_DISTANCE_KM} km).`;
+            }
+          }
+
+          if (allowed) {
             setStatus("success");
             setTimeout(() => {
               onStart();
             }, 1500);
           } else {
-            setErrorMessage(
-              `Você está fora do município de Petrópolis. Distância calculada: ${dist} km.`
-            );
+            setErrorMessage(boundaryError);
             setStatus("error");
             setShowBypass(true);
           }
