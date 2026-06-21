@@ -49,16 +49,16 @@ const RenderCandidateRow: React.FC<{ label: string, candidates: ResolvedCandidat
             }
             
             return (
-              <div key={idx} className="flex items-center gap-2 bg-[#1b1c25] border border-[#232532] px-3 py-1 rounded-lg text-right max-w-full sm:max-w-md">
+              <div key={idx} className="flex items-center gap-2 bg-[#1b1c25] border border-[#232532] px-3 py-1.5 rounded-lg text-right max-w-full sm:max-w-md">
                 {cand.photo ? (
                   <img 
                     src={cand.photo} 
                     alt={cand.name}
-                    className="w-6 h-6 rounded-full object-cover border border-[#1e2029] shrink-0"
+                    className="w-10 h-10 rounded-full object-cover border border-[#1e2029] shrink-0"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-[#232532] flex items-center justify-center font-bold text-[10px] text-white shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-[#232532] flex items-center justify-center font-bold text-xs text-white shrink-0">
                     {cand.name ? cand.name[0] : "?"}
                   </div>
                 )}

@@ -550,6 +550,7 @@ export interface SurveyResponse {
   suggestedCandidate?: string; // Open-text suggestion for next cycle candidate
   deviceHash?: string;   // Device fingerprint value
   ipHash?: string;       // Unique secure SHA-256 hash of voter IP address
+  voterUuid?: string;    // Client-side persistent voter UUID
 }
 
 export const NEIGHBORHOODS_BY_DISTRICT: Record<string, string[]> = {

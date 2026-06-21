@@ -90,6 +90,17 @@ function getCandidateColor(id: string, index: number): string {
   return PALETTE[index % PALETTE.length];
 }
 
+const getShortName = (fullName: string): string => {
+  if (!fullName) return "";
+  const parts = fullName.split(" ");
+  if (parts.length === 0) return "";
+  const first = parts[0];
+  if (first.toLowerCase() === "dr." || first.toLowerCase() === "dra." || first.toLowerCase() === "general" || first.toLowerCase() === "cabo") {
+    return parts.slice(0, 2).join(" ");
+  }
+  return first;
+};
+
 interface CustomizedLineDotProps {
   cx?: number;
   cy?: number;
@@ -100,39 +111,67 @@ const CustomizedLineDot: React.FC<CustomizedLineDotProps> = (props) => {
   const { cx, cy, cand } = props;
   if (cx === undefined || cy === undefined) return null;
 
+  const shortName = getShortName(cand.name);
+
   if (cand.photo) {
     const clipId = `clip-${(cand.id || cand.name).replace(/[^a-zA-Z0-9]/g, "-")}-${Math.round(cx)}-${Math.round(cy)}`;
     return (
       <g>
         <defs>
           <clipPath id={clipId}>
-            <circle cx={cx} cy={cy} r={10} />
+            <circle cx={cx} cy={cy} r={18} />
           </clipPath>
         </defs>
-        <circle cx={cx} cy={cy} r={12} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={1.5} />
-        <circle cx={cx} cy={cy} r={10} fill="#111218" />
+        <circle cx={cx} cy={cy} r={20} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={18} fill="#111218" />
         <image
-          x={cx - 10}
-          y={cy - 10}
-          width={20}
-          height={20}
+          x={cx - 18}
+          y={cy - 18}
+          width={36}
+          height={36}
           href={cand.photo}
           clipPath={`url(#${clipId})`}
           preserveAspectRatio="xMidYMid slice"
         />
+        <text
+          x={cx}
+          y={cy + 30}
+          textAnchor="middle"
+          fill={cand.color || "#e2e8f0"}
+          className="text-[9px] font-black select-none pointer-events-none tracking-tight"
+          style={{
+            textShadow: "0px 0px 3px #050508, 0px 0px 3px #050508, 0px 0px 3px #050508"
+          }}
+        >
+          {shortName}
+        </text>
       </g>
     );
   }
 
   return (
-    <circle 
-      cx={cx} 
-      cy={cy} 
-      r={5} 
-      fill={cand.color || "#3b82f6"} 
-      stroke="#ffffff" 
-      strokeWidth={1.5} 
-    />
+    <g>
+      <circle 
+        cx={cx} 
+        cy={cy} 
+        r={6} 
+        fill={cand.color || "#3b82f6"} 
+        stroke="#ffffff" 
+        strokeWidth={1.5} 
+      />
+      <text
+        x={cx}
+        y={cy + 18}
+        textAnchor="middle"
+        fill={cand.color || "#e2e8f0"}
+        className="text-[9px] font-black select-none pointer-events-none tracking-tight"
+        style={{
+          textShadow: "0px 0px 3px #050508, 0px 0px 3px #050508, 0px 0px 3px #050508"
+        }}
+      >
+        {shortName}
+      </text>
+    </g>
   );
 };
 
@@ -140,39 +179,67 @@ const CustomizedActiveDot: React.FC<CustomizedLineDotProps> = (props) => {
   const { cx, cy, cand } = props;
   if (cx === undefined || cy === undefined) return null;
 
+  const shortName = getShortName(cand.name);
+
   if (cand.photo) {
     const clipId = `clip-active-${(cand.id || cand.name).replace(/[^a-zA-Z0-9]/g, "-")}-${Math.round(cx)}-${Math.round(cy)}`;
     return (
       <g>
         <defs>
           <clipPath id={clipId}>
-            <circle cx={cx} cy={cy} r={13} />
+            <circle cx={cx} cy={cy} r={22} />
           </clipPath>
         </defs>
-        <circle cx={cx} cy={cy} r={16} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={2} />
-        <circle cx={cx} cy={cy} r={13} fill="#111218" />
+        <circle cx={cx} cy={cy} r={24} fill={cand.color || "#3b82f6"} stroke="#0e0f14" strokeWidth={2} />
+        <circle cx={cx} cy={cy} r={22} fill="#111218" />
         <image
-          x={cx - 13}
-          y={cy - 13}
-          width={26}
-          height={26}
+          x={cx - 22}
+          y={cy - 22}
+          width={44}
+          height={44}
           href={cand.photo}
           clipPath={`url(#${clipId})`}
           preserveAspectRatio="xMidYMid slice"
         />
+        <text
+          x={cx}
+          y={cy + 35}
+          textAnchor="middle"
+          fill={cand.color || "#3b82f6"}
+          className="text-[10px] font-black select-none pointer-events-none tracking-tight animate-pulse"
+          style={{
+            textShadow: "0px 0px 3px #050508, 0px 0px 3px #050508, 0px 0px 3px #050508"
+          }}
+        >
+          {shortName}
+        </text>
       </g>
     );
   }
 
   return (
-    <circle 
-      cx={cx} 
-      cy={cy} 
-      r={7} 
-      fill={cand.color || "#3b82f6"} 
-      stroke="#ffffff" 
-      strokeWidth={2} 
-    />
+    <g>
+      <circle 
+        cx={cx} 
+        cy={cy} 
+        r={8} 
+        fill={cand.color || "#3b82f6"} 
+        stroke="#ffffff" 
+        strokeWidth={2} 
+      />
+      <text
+        x={cx}
+        y={cy + 20}
+        textAnchor="middle"
+        fill={cand.color || "#3b82f6"}
+        className="text-[10px] font-black select-none pointer-events-none tracking-tight animate-pulse"
+        style={{
+          textShadow: "0px 0px 3px #050508, 0px 0px 3px #050508, 0px 0px 3px #050508"
+        }}
+      >
+        {shortName}
+      </text>
+    </g>
   );
 };
 
@@ -234,14 +301,17 @@ export const EvolutionTab: React.FC<EvolutionTabProps> = ({ isAdmin, responses =
         };
       });
 
-      // Display all candidate profiles in the evolution chart as requested
+      // Display all candidate profiles in the evolution chart ordered by percentage descending
       let displayedCandidates = [...scoredCandidates];
 
-      // Order alphabetically to retain stable line legends
-      displayedCandidates.sort((a, b) => a.name.localeCompare(b.name));
+      // Order by percentage score of the current period descending so that names with percentages are in order of percentage
+      displayedCandidates.sort((a, b) => b.currentPct - a.currentPct);
 
-      // Construct historical datapoints - Only 1 cycle since the platform was just launched
-      const cycle1: HistoricalDataPoint = { cycle: `Ciclo 1 (Atual: ${currentDates.start} a ${currentDates.end})`, dateRange: `${currentDates.start} a ${currentDates.end}` };
+      // Construct historical datapoints with localized terminology
+      const cycle1: HistoricalDataPoint = { 
+        cycle: `Amostragem do período: ${currentDates.start} a ${currentDates.end}`, 
+        dateRange: `${currentDates.start} a ${currentDates.end}` 
+      };
 
       displayedCandidates.forEach((cand) => {
         const valCurrent = cand.currentPct;
@@ -309,7 +379,7 @@ Dados consolidados quinzenalmente.
     scenario.candidates.forEach((cand) => {
       text += `*${cand.name}* (${cand.party}):\n`;
       scenario.data.forEach((d) => {
-        const cycleName = d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle;
+        const cycleName = d.cycle.includes(":") ? d.cycle.split(":")[0] : (d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle);
         const pct = ((d[cand.name] as number) || 0).toFixed(1);
         text += `  • ${cycleName}: *${pct}%*\n`;
       });
@@ -339,12 +409,12 @@ Dados consolidados quinzenalmente.
             Evolução Histórica Real (Entrevistados)
           </h3>
           <p className="text-xs text-gray-400 max-w-2xl leading-relaxed">
-            Acompanhamento consolidado de todos os ciclos quinzenais anteriores. O algoritmo reconstrói retroativamente e em tempo real a trajetória gráfica de variação percentual com base nas fichas registradas no sistema.
+            Acompanhamento consolidado de todos os ciclos quinzenais anteriores. O algoritmo reconstrói retroativamente e em tempo real a trajetória gráfica de variação percentual com base nas entrevistas registradas no sistema.
           </p>
         </div>
         <div className="flex shrink-0">
           <span className="text-[10px] bg-[#3b82f6]/10 border border-[#3b82f6]/20 text-[#3b82f6] font-mono font-bold uppercase px-3 py-1.5 rounded-xl leading-none">
-            Amostra Real: {responses.length} fichas
+            Amostra Real: {responses.length} entrevistados
           </span>
         </div>
       </div>
@@ -399,6 +469,12 @@ Dados consolidados quinzenalmente.
                 stroke="#4b5563" 
                 fontSize={10} 
                 tickLine={false}
+                tickFormatter={(val) => {
+                  if (val && val.includes("Amostragem do período: ")) {
+                    return val.replace("Amostragem do período: ", "Período: ");
+                  }
+                  return val;
+                }}
               />
               <YAxis 
                 stroke="#4b5563" 
@@ -471,7 +547,7 @@ Dados consolidados quinzenalmente.
                   <th className="py-3 px-4">Pré-Candidato (Partido)</th>
                   {scenario.data.map((d, index) => (
                     <th key={index} className="py-3 px-4 whitespace-nowrap">
-                      {d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle} <span className="block text-[9px] text-gray-500 font-normal">{d.dateRange}</span>
+                      {d.cycle.includes(":") ? d.cycle.split(":")[0] : (d.cycle.includes(" (") ? d.cycle.split(" (")[0] : d.cycle)} <span className="block text-[9px] text-gray-500 font-normal">{d.dateRange}</span>
                     </th>
                   ))}
                   <th className="py-3 px-4 text-emerald-400 text-right">Flutuação Líquida</th>
@@ -492,11 +568,11 @@ Dados consolidados quinzenalmente.
                           <img 
                             src={cand.photo} 
                             alt={cand.name} 
-                            className="w-7 h-7 rounded-full object-cover border border-[#1f212a] shrink-0" 
+                            className="w-12 h-12 rounded-full object-cover border border-[#1f212a] shrink-0" 
                             referrerPolicy="no-referrer"
                           />
                         ) : (
-                          <div className="w-7 h-7 rounded-full bg-[#161821] border border-[#2b2d3c] flex items-center justify-center text-[9px] font-mono font-bold text-gray-400 shrink-0">
+                          <div className="w-12 h-12 rounded-full bg-[#161821] border border-[#2b2d3c] flex items-center justify-center text-sm font-mono font-bold text-gray-400 shrink-0">
                             {cand.name.charAt(0).toUpperCase()}
                           </div>
                         )}
@@ -533,7 +609,7 @@ Dados consolidados quinzenalmente.
         <div className="bg-[#0b0c11] border border-[#1b1c27] rounded-2xl p-4 flex items-center gap-3">
           <Info className="h-4 w-4 text-gray-400 shrink-0" />
           <p className="text-[11px] text-gray-400 font-sans leading-relaxed text-left">
-            <b>Nota Técnica:</b> Os índices retroativos acima são derivados em tempo real de forma ponderada a partir das fichas de coletas legítimas cadastradas pelos entrevistadores no sistema.
+            <b>Nota Técnica:</b> Os índices retroativos acima são derivados em tempo real de forma ponderada a partir das entrevistas de coletas legítimas cadastradas pelos entrevistadores no sistema.
           </p>
         </div>
       )}

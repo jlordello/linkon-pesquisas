@@ -56,11 +56,11 @@ export const SingleSelectionStep: React.FC<SingleSelectionStepProps> = ({
                 <img
                   src={cand.photo}
                   alt={cand.name}
-                  className="w-8 h-8 rounded-full object-cover border border-[#1e2029] shrink-0"
+                  className="w-16 h-16 rounded-full object-cover border border-[#1e2029] shrink-0 shadow-md"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-650 flex items-center justify-center font-bold text-xs text-white shrink-0">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 border border-gray-650 flex items-center justify-center font-bold text-lg text-white shrink-0 shadow-md">
                   {cand.name[0]}
                 </div>
               )}

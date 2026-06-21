@@ -128,6 +128,14 @@ export default function App() {
   const [isPrivateBrowsing, setIsPrivateBrowsing] = useState<boolean>(false);
   const [deviceHashState, setDeviceHashState] = useState<string>("");
   const [clientIpHash, setClientIpHash] = useState<string>("");
+  const [voterUuid] = useState<string>(() => {
+    let uid = localStorage.getItem("linkon_voter_uuid");
+    if (!uid) {
+      uid = "v-" + Math.random().toString(36).substring(2, 15) + "-" + Date.now().toString(36);
+      localStorage.setItem("linkon_voter_uuid", uid);
+    }
+    return uid;
+  });
 
   // Survey Wizard Step control
   const [surveyStep, setSurveyStep] = useState<number>(0); 
@@ -503,12 +511,19 @@ export default function App() {
           loaded.push(docSnap.data() as SurveyResponse);
         });
 
-        // Check fingerprint and private mode
+        // Check fingerprint, persistent voterUuid, and private mode
         const hash = await checkSecurityAndFp();
-        const hasVoted = loaded.some(r => 
-          (r.deviceHash === hash || (r.ipHash && clientIpHash && r.ipHash === clientIpHash)) && 
-          getCycleKeyForTimestamp(r.timestamp) === currentCycle.key
-        );
+        const hasVoted = loaded.some(r => {
+          const sameCycle = getCycleKeyForTimestamp(r.timestamp) === currentCycle.key;
+          if (!sameCycle) return false;
+
+          // 1. Check local UUID match (100% accurate per browser)
+          if (r.voterUuid && voterUuid && r.voterUuid === voterUuid) {
+            return true;
+          }
+
+          return false;
+        });
         if (hasVoted) {
           setAlreadyVoted(true);
         }
@@ -1011,7 +1026,8 @@ export default function App() {
       id: `li-res-usr-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
       timestamp: new Date().toISOString(),
       deviceHash: deviceHashState || (await getDeviceFingerprint()),
-      ipHash: clientIpHash
+      ipHash: clientIpHash,
+      voterUuid: voterUuid
     };
 
     const updated = [...responses, finalResponse];
@@ -1661,7 +1677,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <div className="text-right">
                   <span className="text-[10px] text-gray-500 font-mono block uppercase">Base Acumulada</span>
                   <span className="text-xs font-bold font-mono text-emerald-400 bg-emerald-500/5 border border-emerald-500/20 px-3 py-1 rounded-lg">
-                    {responses.length} fichas
+                    {responses.length} entrevistados
                   </span>
                 </div>
               </div>
@@ -2001,7 +2017,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                           <div className="bg-[#0b0c10] border border-[#1e202a] rounded-2xl p-4 text-center space-y-1 shadow-lg">
                             <span className="text-[9px] text-gray-500 font-mono uppercase font-bold tracking-wider block">ELEITORES MAPEADOS</span>
                             <span className="text-2xl font-black text-white font-mono leading-none block">{candidateProfile.totalVotes}</span>
-                            <span className="text-[10px] text-gray-400 font-mono">fichas individuais</span>
+                            <span className="text-[10px] text-gray-400 font-mono">entrevistados individuais</span>
                           </div>
                           <div className="bg-[#0b0c10] border border-[#1e202a] rounded-2xl p-4 text-center space-y-1 shadow-lg">
                             <span className="text-[9px] text-gray-500 font-mono uppercase font-bold tracking-wider block">REPRESENTATIVIDADE DA BASE</span>
@@ -3175,7 +3191,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               <div className="space-y-4">
                 <h3 className="text-xl font-bold font-display text-white">Navegação Privada Ativa</h3>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Para garantir a integridade metodológica das amostragens e evitar votos duplicados, votos através de <strong>guias anônimas ou modo privado</strong> não são permitidos nesta plataforma.
+                  Para garantir a integridade metodológica das amostragens e evitar entrevistas duplicadas, registrar entrevistas através de <strong>guias anônimas ou modo privado</strong> não é permitido nesta plataforma.
                 </p>
                 <div className="bg-[#1b1411] border border-amber-900/30 rounded-xl p-4 text-left space-y-1">
                   <span className="text-[9px] text-amber-400 font-mono font-bold tracking-wider uppercase block">Medida de Proteção Antifraude</span>
@@ -3187,7 +3203,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 className="w-full px-5 py-2.5 bg-[#1c1e27] hover:bg-[#252834] border border-[#2d303f] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <BarChart4 className="h-4 w-4" />
-                Ver gráfico de votos
+                Ver gráficos das entrevistas
               </button>
             </div>
           ) : alreadyVoted && surveyStep !== (4 + activeQuestions.length) ? (
@@ -3196,13 +3212,13 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <Check className="h-8 w-8 text-[#3b82f6]" />
               </div>
               <div className="space-y-4">
-                <h3 className="text-xl font-bold font-display text-white">Voto já Computado!</h3>
+                <h3 className="text-xl font-bold font-display text-white">Entrevista já Registrada!</h3>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Para honrar a integridade metodológica de forma justa, cada dispositivo só pode responder uma amostragem por ciclo quinzenal.
+                  Para honrar a integridade metodológica de forma justa, cada dispositivo só pode registrar uma entrevista por ciclo quinzenal.
                 </p>
                 <div className="bg-[#12141f] border border-[#212330] rounded-xl p-4 text-left space-y-1">
                   <span className="text-[9px] text-[#3b82f6] font-mono font-bold tracking-wider uppercase block">Bloqueio Metodológico de IP/Dispositivo</span>
-                  <p className="text-xs text-gray-300">Este dispositivo poderá responder a uma nova amostragem a partir de:</p>
+                  <p className="text-xs text-gray-300">Este dispositivo poderá registrar uma nova entrevista a partir de:</p>
                   <p className="text-sm text-emerald-400 font-mono font-black mt-1.5 bg-[#0f2118] inline-block px-3 py-1 rounded border border-emerald-500/20">{getNextCycleStartDate()}</p>
                 </div>
               </div>
@@ -3211,7 +3227,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 className="w-full px-5 py-2.5 bg-[#3b82f6] hover:bg-[#1d4ed8] text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-[#3b82f6]/10 animate-pulse"
               >
                 <BarChart4 className="h-4 w-4" />
-                Ver gráfico de votos
+                Ver gráficos das entrevistas
               </button>
             </div>
           ) : (
@@ -3255,6 +3271,8 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     setAlreadyVoted={setAlreadyVoted}
                     clientIpHash={clientIpHash}
                     setClientIpHash={setClientIpHash}
+                    voterUuid={voterUuid}
+                    deviceHash={deviceHashState}
                   />
                 )}
 
@@ -3423,7 +3441,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block font-bold">TOTAL DE RESPOSTAS</span>
                 <div className="flex items-baseline gap-1.5 leading-none">
                   <span className="text-2xl font-bold font-mono text-white">{responses.length}</span>
-                  <span className="text-[11px] text-gray-400">fichas</span>
+                  <span className="text-[11px] text-gray-400">entrevistados</span>
                 </div>
                 <div className="w-full bg-[#181a24] h-1 rounded-full overflow-hidden">
                   <div className="bg-[#3b82f6] h-full rounded-full" style={{ width: `${Math.min(100, (responses.length/500)*100)}%` }} />
@@ -3673,11 +3691,11 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                     <img
                                       src={(cand as any).photo}
                                       alt={cand.name}
-                                      className="w-6 h-6 rounded-full object-cover border border-[#1b1c28]"
+                                      className="w-11 h-11 rounded-full object-cover border border-[#1b1c28]"
                                       referrerPolicy="no-referrer"
                                     />
                                   ) : (
-                                    <div className="w-6 h-6 rounded-full bg-[#1b1c26] border border-[#2b2d39] flex items-center justify-center text-[8px] font-bold text-gray-400 font-mono">
+                                    <div className="w-11 h-11 rounded-full bg-[#1b1c26] border border-[#2b2d39] flex items-center justify-center text-xs font-bold text-gray-400 font-mono">
                                       {cand.name.substring(0, 1).toUpperCase()}
                                     </div>
                                   )}

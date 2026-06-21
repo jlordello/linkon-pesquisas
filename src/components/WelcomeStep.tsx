@@ -25,6 +25,8 @@ interface WelcomeStepProps {
   setAlreadyVoted: (voted: boolean) => void;
   clientIpHash: string;
   setClientIpHash: (hash: string) => void;
+  voterUuid: string;
+  deviceHash: string;
 }
 
 const PETROPOLIS_LAT = -22.5112;
@@ -53,7 +55,9 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({
   responses, 
   setAlreadyVoted, 
   clientIpHash, 
-  setClientIpHash 
+  setClientIpHash,
+  voterUuid,
+  deviceHash
 }) => {
   const [status, setStatus] = useState<CheckState>("initial");
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -171,14 +175,21 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({
           const hashVal = await sha256(detectedIp);
           setClientIpHash(hashVal);
           
-          // Verify if this IP address has already voted in this cycle
+          // Verify if voterUuid has already voted in this cycle
           const currentCycle = getCurrentCycleDates();
-          const hasVotedIP = responses.some(r => 
-            (r.ipHash === hashVal || r.ipHash === detectedIp) && 
-            getCycleKeyForTimestamp(r.timestamp) === currentCycle.key
-          );
+          const alreadyVotedRecord = responses.some(r => {
+            const sameCycle = getCycleKeyForTimestamp(r.timestamp) === currentCycle.key;
+            if (!sameCycle) return false;
+
+            // 1. Check local UUID match (100% accurate browser tracking)
+            if (r.voterUuid && voterUuid && r.voterUuid === voterUuid) {
+              return true;
+            }
+
+            return false;
+          });
           
-          if (hasVotedIP) {
+          if (alreadyVotedRecord) {
             setAlreadyVoted(true);
           }
         }
@@ -323,10 +334,24 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({
           }
 
           if (allowed) {
-            setStatus("success");
-            setTimeout(() => {
-              onStart();
-            }, 1500);
+            // Double verify anti-fraud IP + fingerprint limit only AFTER they pass geographic check!
+            const currentCycle = getCurrentCycleDates();
+            const isAbuseIP = responses.some(r => {
+              const sameCycle = getCycleKeyForTimestamp(r.timestamp) === currentCycle.key;
+              if (!sameCycle) return false;
+              return deviceHash && r.deviceHash === deviceHash && clientIpHash && r.ipHash === clientIpHash;
+            });
+
+            if (isAbuseIP) {
+              setErrorMessage("Este dispositivo ou rede já possui uma entrevista registrada para este ciclo quinzenal.");
+              setStatus("error");
+              setShowBypass(false); // Disable bypass for confirmed double-voting fraud attempts
+            } else {
+              setStatus("success");
+              setTimeout(() => {
+                onStart();
+              }, 1500);
+            }
           } else {
             setErrorMessage(boundaryError);
             setStatus("error");
