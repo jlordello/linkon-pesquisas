@@ -10,6 +10,12 @@ service cloud.firestore {
     match /candidates_config/{categoryId} {
       allow read, write: if true;
     }
+    match /signatures_6x1/{signatureId} {
+      allow read, write: if true;
+    }
+    match /petition_settings/{settingId} {
+      allow read, write: if true;
+    }
     match /test/{documentId} {
       allow read, write: if true;
     }

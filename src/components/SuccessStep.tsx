@@ -46,18 +46,18 @@ export const SuccessStep: React.FC<SuccessStepProps> = ({ onRestart, onGoToDashb
       <div className="bg-[#0b0c11] border border-[#1b1c27] rounded-2xl p-4 max-w-sm mx-auto text-left space-y-3 shadow-inner">
         <div className="flex items-center gap-2 text-blue-400 border-b border-[#1b1c27] pb-2">
           <CalendarDays className="h-4 w-4" />
-          <span className="text-[10px] font-bold font-mono tracking-wider uppercase">Controle de Ciclos - Linkon</span>
+          <span className="text-[10px] font-bold font-mono tracking-wider uppercase">Controle de Amostragens - Linkon</span>
         </div>
         
         <div className="space-y-2 text-xs">
           <div className="flex justify-between items-center">
-            <span className="text-gray-400">Ciclo Vigente:</span>
+            <span className="text-gray-400">Amostragem Vigente:</span>
             <span className="text-white font-mono font-bold bg-[#141b2e] border border-blue-500/25 px-2 py-0.5 rounded">
               {currentCycle.start} a {currentCycle.end}
             </span>
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-gray-400">Próximo Ciclo Abre Em:</span>
+            <span className="text-gray-400">Próxima Amostragem Abre Em:</span>
             <span className="text-emerald-400 font-mono font-bold bg-[#0f2118] border border-emerald-500/25 px-2 py-0.5 rounded animate-pulse">
               {nextCycleStart}
             </span>

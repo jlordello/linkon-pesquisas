@@ -343,7 +343,7 @@ export const WelcomeStep: React.FC<WelcomeStepProps> = ({
             });
 
             if (isAbuseIP) {
-              setErrorMessage("Este dispositivo ou rede já possui uma entrevista registrada para este ciclo quinzenal.");
+              setErrorMessage("Este dispositivo ou rede já possui uma entrevista registrada para esta amostragem quinzenal.");
               setStatus("error");
               setShowBypass(false); // Disable bypass for confirmed double-voting fraud attempts
             } else {

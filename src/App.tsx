@@ -49,7 +49,8 @@ import {
   CandidateConfig,
   QuestionConfig,
   getDeviceFingerprint,
-  getCycleKeyForTimestamp
+  getCycleKeyForTimestamp,
+  getDatesForCycleKey
 } from "./types";
 
 // Modular Survey Steps
@@ -61,6 +62,8 @@ import { SenateSelectionStep } from "./components/SenateSelectionStep";
 import { ReviewStep } from "./components/ReviewStep";
 import { SuccessStep } from "./components/SuccessStep";
 import { EvolutionTab } from "./components/EvolutionTab";
+import { Petition6x1Page } from "./components/Petition6x1Page";
+import { Petition6x1Tab } from "./components/Petition6x1Tab";
 
 // Firebase/Firestore Integration
 import { collection, getDocs, doc, setDoc, deleteDoc, writeBatch, getDocFromServer } from "firebase/firestore";
@@ -123,7 +126,35 @@ export default function App() {
   // Database States
   const [responses, setResponses] = useState<SurveyResponse[]>([]);
   const [standaloneSuggestions, setStandaloneSuggestions] = useState<{ id: string; timestamp: string; suggestedCandidate: string }[]>([]);
-  const [activeView, setActiveView] = useState<"interviewee" | "analyst">("interviewee");
+
+  // Selected Cycle Key for Filtering (Default is current cycle key)
+  const [selectedCycleKey, setSelectedCycleKey] = useState<string>(() => getCurrentCycleDates().key);
+
+  // Memoize all unique cycle keys available in the database (plus current cycle so it is always present)
+  const availableCycles = useMemo(() => {
+    const currentKey = getCurrentCycleDates().key;
+    const keysSet = new Set<string>();
+    keysSet.add(currentKey);
+
+    responses.forEach((r) => {
+      const k = getCycleKeyForTimestamp(r.timestamp);
+      if (k) {
+        keysSet.add(k);
+      }
+    });
+
+    return Array.from(keysSet).sort((a, b) => b.localeCompare(a));
+  }, [responses]);
+
+  // Filtered responses based on selectedCycleKey
+  const filteredResponses = useMemo(() => {
+    if (!selectedCycleKey) return responses;
+    return responses.filter((r) => {
+      const k = getCycleKeyForTimestamp(r.timestamp) || getCurrentCycleDates().key;
+      return k === selectedCycleKey;
+    });
+  }, [responses, selectedCycleKey]);
+  const [activeView, setActiveView] = useState<"interviewee" | "analyst" | "petition_6x1">("interviewee");
   const [alreadyVoted, setAlreadyVoted] = useState<boolean>(false);
   const [isPrivateBrowsing, setIsPrivateBrowsing] = useState<boolean>(false);
   const [deviceHashState, setDeviceHashState] = useState<string>("");
@@ -165,7 +196,7 @@ export default function App() {
   });
 
   // Analyst Control Center States
-  const [analystTab, setAnalystTab] = useState<"scenarios" | "approvals" | "demographics" | "report" | "evolution">("scenarios");
+  const [analystTab, setAnalystTab] = useState<"scenarios" | "approvals" | "demographics" | "report" | "evolution" | "petition_6x1">("scenarios");
   const [activeScenario, setActiveScenario] = useState<"president" | "presidentRunoff" | "governor" | "governorRunoff" | "senate" | "stateDeputy" | "federalDeputy" | "mayor">("president");
   const [valuationViewType, setValuationViewType] = useState<"valids" | "totals">("valids");
   
@@ -239,7 +270,7 @@ export default function App() {
     if (activeView !== "analyst" && !isAdminMode) return;
     
     // Filter non-empty open candidate suggestions from both responses and standalone suggestions
-    const rawResponsesSuggestions = responses
+    const rawResponsesSuggestions = filteredResponses
       .map(r => r.suggestedCandidate)
       .filter((s): s is string => typeof s === "string" && s.trim().length > 0);
 
@@ -326,7 +357,7 @@ export default function App() {
               name,
               party,
               count,
-              analysis: `Indicação orgânica de Petrópolis. Recenseado com ${count} menções neste ciclo de coletas.`
+              analysis: `Indicação orgânica de Petrópolis. Recenseado com ${count} menções nesta amostragem de coletas.`
             };
           });
 
@@ -346,7 +377,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [activeView, isAdminMode, responses, standaloneSuggestions]);
+  }, [activeView, isAdminMode, filteredResponses, standaloneSuggestions]);
 
   // Detect private / incognito browsing to protect poll audit integrity
   useEffect(() => {
@@ -414,6 +445,25 @@ export default function App() {
     return () => {
       window.removeEventListener("popstate", checkRoute);
       window.removeEventListener("hashchange", checkRoute);
+    };
+  }, []);
+
+  // Auto-route check for Fim da Escala 6x1 petition page
+  useEffect(() => {
+    const checkPetitionRoute = () => {
+      const isPetition6x1 = window.location.pathname.includes("fimdaescala6x1") || 
+                           window.location.hash.includes("fimdaescala6x1") ||
+                           window.location.search.includes("fimdaescala6x1");
+      if (isPetition6x1) {
+        setActiveView("petition_6x1");
+      }
+    };
+    checkPetitionRoute();
+    window.addEventListener("popstate", checkPetitionRoute);
+    window.addEventListener("hashchange", checkPetitionRoute);
+    return () => {
+      window.removeEventListener("popstate", checkPetitionRoute);
+      window.removeEventListener("hashchange", checkPetitionRoute);
     };
   }, []);
 
@@ -622,7 +672,7 @@ export default function App() {
     syncFirestoreData();
 
     if (hasReset) {
-      showNotification(`Dados reiniciados! Novo ciclo quinzenal: ${currentCycle.start} a ${currentCycle.end}`, "info");
+      showNotification(`Dados reiniciados! Nova amostragem quinzenal: ${currentCycle.start} a ${currentCycle.end}`, "info");
     }
   }, []);
 
@@ -800,8 +850,8 @@ export default function App() {
 
   // Real-time calculated aggregations
   const activePollData = useMemo(() => {
-    return aggregateSurveyResponses(responses);
-  }, [responses, candidateUpdateTrigger]);
+    return aggregateSurveyResponses(filteredResponses, selectedCycleKey === getCurrentCycleDates().key);
+  }, [filteredResponses, selectedCycleKey, candidateUpdateTrigger]);
 
   // Valid vote precomputations
   const presValids = useMemo(() => {
@@ -898,7 +948,7 @@ export default function App() {
       "Outros / Não Especificado": 0
     };
 
-    responses.forEach(r => {
+    filteredResponses.forEach(r => {
       genderCounts[r.gender] = (genderCounts[r.gender] || 0) + 1;
       ageCounts[r.age] = (ageCounts[r.age] || 0) + 1;
       neighborhoodCounts[r.neighborhood] = (neighborhoodCounts[r.neighborhood] || 0) + 1;
@@ -945,7 +995,7 @@ export default function App() {
       color: Object.entries(colorCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 5) % colors.length] })),
       religion: Object.entries(religionCounts).map(([name, value], i) => ({ name, value, color: colors[(i + 6) % colors.length] }))
     };
-  }, [responses]);
+  }, [filteredResponses]);
 
   // Top active segment
   const topActiveNeighborhood = useMemo(() => {
@@ -1269,7 +1319,7 @@ export default function App() {
     });
   };
 
-  const filteredResponses = useMemo(() => {
+  const adminSearchFilteredResponses = useMemo(() => {
     return responses.filter(r => {
       const term = dbSearch.toLowerCase();
       return r.neighborhood.toLowerCase().includes(term) ||
@@ -1301,13 +1351,13 @@ export default function App() {
   const candidateProfile = useMemo(() => {
     if (!selectedCandidateData.id) return null;
     return calculateCandidateProfile(
-      responses,
+      filteredResponses,
       selectedCandidateData.id,
       adminCategory,
       selectedCandidateData.name,
       selectedCandidateData.party
     );
-  }, [responses, selectedCandidateData, adminCategory]);
+  }, [filteredResponses, selectedCandidateData, adminCategory]);
 
   const getCandidateWhatsAppText = (): string => {
     if (!candidateProfile) return "";
@@ -1340,7 +1390,7 @@ export default function App() {
 
 *👤 Candidato:* *${candidateProfile.name}* (${candidateProfile.party})
 *📊 Cargo:* ${adminCategory === "president" ? "Presidente" : adminCategory === "governor" ? "Governador" : adminCategory === "senate" ? "Senador" : adminCategory === "stateDeputy" ? "Deputado Estadual" : "Deputado Federal"}
-*📅 Ciclo Vigente:* ${cycle.start} a ${cycle.end}
+*📅 Amostragem Vigente:* ${cycle.start} a ${cycle.end}
 
 --------------------------------------------
 
@@ -1384,7 +1434,7 @@ ${formattedDistricts || "  (Sem distritos registrados)"}
 --------------------------------------------
 
 *📍 PRINCIPAIS BAIRROS DE APOIO (Top 5):*
-${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
+${formattedNeighs || "  (Sem votos registrados nesta amostragem)"}
 
 --------------------------------------------
 
@@ -1427,7 +1477,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
     const neighListText = candidateProfile.neighborhoods
       .map((n, idx) => `• ${idx + 1}. ${n.neighborhood}: *${n.percentage}%* (${n.count} ${n.count === 1 ? 'voto' : 'votos'})`)
       .join("\n");
-    const textToCopy = `*📍 TODOS OS BAIRROS COM VOTO - ${candidateProfile.name} (${candidateProfile.party})*\n\n${neighListText || "Não há votos registrados para nenhum bairro de Petrópolis neste ciclo."}\n\n*👉 Instituto Linkon - Diagnóstico de Campo*`;
+    const textToCopy = `*📍 TODOS OS BAIRROS COM VOTO - ${candidateProfile.name} (${candidateProfile.party})*\n\n${neighListText || "Não há votos registrados para nenhum bairro de Petrópolis nesta amostragem."}\n\n*👉 Instituto Linkon - Diagnóstico de Campo*`;
     
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopiedNeighsText(true);
@@ -1463,7 +1513,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               Por questões de <b>integridade estatística, confiabilidade e segurança metodológica</b>, o Instituto Linkon não permite o preenchimento por entrevistados em navegadores no modo anônimo ou de navegação privada.
             </p>
             <p>
-              Nosso sistema utiliza criptografia de tokens e identificadores locais por ciclo de 15 dias (via armazenamento seguro local) para impedir duplicidades, auto-registro massivo ou manipulação externa da amostragem eleitoral em Petrópolis.
+              Nosso sistema utiliza criptografia de tokens e identificadores locais por amostragem de 15 dias (via armazenamento seguro local) para impedir duplicidades, auto-registro massivo ou manipulação externa da amostragem eleitoral em Petrópolis.
             </p>
             <p className="text-xs text-gray-500">
               A navegação privada limpa esses dados instantaneamente ao fechar a guia, quebrando qualquer possibilidade de auditoria independente e corrompendo a amostragem justa.
@@ -1637,7 +1687,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Limpar Ciclo
+                  Limpar Amostragem
                 </button>
 
                 <button
@@ -1664,12 +1714,12 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   ⚙️ Monitoramento Geral de Coleta (Painel Privado)
                 </h2>
                 <p className="text-xs text-gray-400">
-                  Gerenciamento do banco de dados de amostragem e auditoria do ciclo corrente.
+                  Gerenciamento do banco de dados de amostragem e auditoria da amostragem corrente.
                 </p>
               </div>
               <div className="flex items-center gap-6 self-start md:self-auto">
                 <div className="text-left">
-                  <span className="text-[10px] text-gray-500 font-mono block uppercase">Ciclo Ativo</span>
+                  <span className="text-[10px] text-gray-500 font-mono block uppercase">Amostragem Ativa</span>
                   <span className="text-xs font-bold font-mono text-[#3b82f6] bg-[#3b82f6]/5 border border-[#3b82f6]/20 px-3 py-1 rounded-lg">
                     {getCurrentCycleDates().start} a {getCurrentCycleDates().end}
                   </span>
@@ -1785,7 +1835,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     </div>
                   ) : (
                     <div className="bg-[#0b0c10]/40 border border-[#1b1c24] p-6 rounded-xl text-center">
-                      <p className="text-xs text-gray-500 font-mono">Nenhum pré-candidato sugerido pelos entrevistados neste ciclo ainda.</p>
+                      <p className="text-xs text-gray-500 font-mono">Nenhum pré-candidato sugerido pelos entrevistados nesta amostragem ainda.</p>
                     </div>
                   )}
                 </div>
@@ -1866,7 +1916,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                       [...activePollData.federalDeputyScenario.candidates].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
                     ).map((cand) => {
                       const candProfile = calculateCandidateProfile(
-                        responses,
+                        filteredResponses,
                         cand.id,
                         adminCategory,
                         cand.name,
@@ -2005,7 +2055,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                         <div className="space-y-1">
                           <h4 className="text-base font-black text-white">Base de Amostragem Vazia</h4>
                           <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed">
-                            Nenhum eleitor real do cadastro indicou voto estimulado em <span className="text-white">{candidateProfile.name}</span> neste ciclo de {getCurrentCycleDates().start} a {getCurrentCycleDates().end}.
+                            Nenhum eleitor real do cadastro indicou voto estimulado em <span className="text-white">{candidateProfile.name}</span> nesta amostragem de {getCurrentCycleDates().start} a {getCurrentCycleDates().end}.
                           </p>
                         </div>
                       </div>
@@ -3128,61 +3178,72 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
         /* STANDARD PUBLIC CLIENT SCREEN */
         <>
           {/* Main Top Header */}
-          <header className="bg-[#0b0c10]/95 backdrop-blur-xl border-b border-[#1b1c23] sticky top-0 z-40 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          
-          <div className="flex items-center gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold font-display tracking-tight text-white uppercase">
-                  Instituto <span className="text-[#3b82f6]">Linkon</span>
-                </h1>
-                <span className="text-[9px] bg-blue-500/15 text-blue-400 font-semibold border border-blue-500/20 px-1.5 py-0.5 rounded uppercase font-mono tracking-wide">
-                  Sondagem Eleitoral
-                </span>
+          {activeView !== "petition_6x1" && (
+            <header className="bg-[#0b0c10]/95 backdrop-blur-xl border-b border-[#1b1c23] sticky top-0 z-40 px-6 py-4">
+              <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+                
+                <div className="flex items-center gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-lg font-bold font-display tracking-tight text-white uppercase">
+                        Instituto <span className="text-[#3b82f6]">Linkon</span>
+                      </h1>
+                      <span className="text-[9px] bg-blue-500/15 text-blue-400 font-semibold border border-blue-500/20 px-1.5 py-0.5 rounded uppercase font-mono tracking-wide">
+                        Sondagem Eleitoral
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 font-mono tracking-tight leading-none mt-0.5">
+                      Opinião Pública & Modelagem Amostral • Petrópolis-RJ
+                    </p>
+                  </div>
+                </div>
+
+                {/* Core View Selector Tabs */}
+                <div className="flex flex-wrap items-center bg-[#111218] p-1.5 rounded-xl border border-[#21232e] gap-1">
+                  <button
+                    onClick={() => {
+                      window.location.hash = "";
+                      setActiveView("interviewee");
+                      if (surveySubmitted) handleResetSurvey();
+                    }}
+                    className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeView === "interviewee"
+                        ? "bg-[#3b82f6] text-white shadow-lg shadow-[#3b82f6]/10"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" />
+                    Responder Questionário
+                  </button>
+                  <button
+                    onClick={() => {
+                      window.location.hash = "";
+                      setActiveView("analyst");
+                    }}
+                    className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                      activeView === "analyst"
+                        ? "bg-[#3b82f6] text-white shadow-lg shadow-[#3b82f6]/10"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    <BarChart4 className="h-3.5 w-3.5" />
+                    Gráfico de votos
+                  </button>
+                </div>
+
               </div>
-              <p className="text-[10px] text-gray-400 font-mono tracking-tight leading-none mt-0.5">
-                Opinião Pública & Modelagem Amostral • Petrópolis-RJ
-              </p>
-            </div>
-          </div>
-
-          {/* Core View Selector Tabs */}
-          <div className="flex items-center bg-[#111218] p-1.5 rounded-xl border border-[#21232e]">
-            <button
-              onClick={() => {
-                setActiveView("interviewee");
-                if (surveySubmitted) handleResetSurvey();
-              }}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeView === "interviewee"
-                  ? "bg-[#3b82f6] text-white shadow-lg shadow-[#3b82f6]/10"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              <ClipboardList className="h-3.5 w-3.5" />
-              Responder Questionário
-            </button>
-            <button
-              onClick={() => setActiveView("analyst")}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                activeView === "analyst"
-                  ? "bg-[#3b82f6] text-white shadow-lg shadow-[#3b82f6]/10"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              <BarChart4 className="h-3.5 w-3.5" />
-              Gráfico de votos
-            </button>
-          </div>
-
-        </div>
-      </header>
+            </header>
+          )}
 
       {/* Primary content space */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         
-        {activeView === "interviewee" ? (
+        {activeView === "petition_6x1" ? (
+          <Petition6x1Page onBackToSurvey={() => {
+            window.location.hash = "";
+            setActiveView("interviewee");
+          }} />
+        ) : activeView === "interviewee" ? (
           isPrivateBrowsing && surveyStep !== (4 + activeQuestions.length) ? (
             <div className="max-w-md mx-auto bg-[#0e0f14] border border-amber-500/30 p-8 rounded-2xl text-center space-y-6 animate-fadeIn my-12 shadow-lg shadow-amber-500/5">
               <div className="mx-auto w-16 h-16 bg-amber-500/15 border border-amber-500/40 rounded-full flex items-center justify-center">
@@ -3214,7 +3275,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               <div className="space-y-4">
                 <h3 className="text-xl font-bold font-display text-white">Entrevista já Registrada!</h3>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  Para honrar a integridade metodológica de forma justa, cada dispositivo só pode registrar uma entrevista por ciclo quinzenal.
+                  Para honrar a integridade metodológica de forma justa, cada dispositivo só pode registrar uma entrevista por amostragem quinzenal.
                 </p>
                 <div className="bg-[#12141f] border border-[#212330] rounded-xl p-4 text-left space-y-1">
                   <span className="text-[9px] text-[#3b82f6] font-mono font-bold tracking-wider uppercase block">Bloqueio Metodológico de IP/Dispositivo</span>
@@ -3402,12 +3463,12 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   <Calendar className="h-6 w-6 animate-pulse" />
                 </div>
                 <div className="space-y-1 text-left">
-                  <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">💬 Como funcionam os Ciclos de Sondagem Rotativos?</span>
+                  <span className="text-[10px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">💬 Como funcionam as Amostragens de Sondagem Rotativas?</span>
                   <p className="text-white text-base font-bold font-sans">
                     Período de Recolhimento da Entrevista: <span className="text-[#3b82f6] font-mono">{getCurrentCycleDates().start} a {getCurrentCycleDates().end}</span>
                   </p>
                   <p className="text-xs text-gray-400">
-                    Sondagem Automatizada Quinzenal: A cada 15 dias os dados são consolidados e um novo ciclo se inicia de forma limpa, permitindo que os participantes opinem novamente sobre o cenário para máxima precisão temporal.
+                    Sondagem Automatizada Quinzenal: A cada 15 dias os dados são consolidados e uma nova amostragem se inicia de forma limpa, permitindo que os participantes opinem novamente sobre o cenário para máxima precisão temporal.
                   </p>
                 </div>
               </div>
@@ -3419,6 +3480,50 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <div className="text-left">
                   <span className="text-[9px] uppercase font-mono text-gray-450 block font-bold text-gray-400">PRÓXIMA AMOSTRAGEM INICIA EM:</span>
                   <span className="text-xs font-bold font-mono text-emerald-400">{getNextCycleStartDate()}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* CYCLE SELECTOR CARD FOR MULTI-CYCLE ANALYSIS */}
+            <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-5 text-left space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-red-600/10 border border-red-600/25 text-[#E41221] px-2.5 py-0.5 rounded-lg font-mono font-bold uppercase tracking-wider">
+                      Filtro de Período
+                    </span>
+                    <span className="text-xs text-gray-550 font-mono">| {availableCycles.length} amostragem(ns) disponível(is)</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-display">Período de Amostragem Eleitoral</h3>
+                  <p className="text-xs text-gray-400">
+                    Selecione a amostragem de sondagem desejada. Todos os cenários eleitorais, avaliações de governo, boletins e perfis demográficos abaixo serão atualizados instantaneamente.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <span className="text-xs text-gray-400 shrink-0 font-bold sm:text-right">Amostragem Selecionada:</span>
+                  <select
+                    value={selectedCycleKey}
+                    onChange={(e) => setSelectedCycleKey(e.target.value)}
+                    className="bg-[#14151b] border border-[#2d303f] hover:border-blue-500 text-white font-mono text-xs font-bold rounded-xl px-4 py-3 cursor-pointer outline-none transition-all focus:ring-2 focus:ring-[#3b82f6]/50"
+                  >
+                    {availableCycles.map((key) => {
+                      const current = getCurrentCycleDates();
+                      if (key === current.key) {
+                        return (
+                          <option key={key} value={key}>
+                            ⭐ Amostragem Atual ({current.start} a {current.end})
+                          </option>
+                        );
+                      }
+                      const dates = getDatesForCycleKey(key);
+                      return (
+                        <option key={key} value={key}>
+                          📅 Amostragem Anterior ({dates.start} a {dates.end})
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
               </div>
             </div>
@@ -3438,14 +3543,15 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               
               <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-5 space-y-2">
-                <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block font-bold">TOTAL DE RESPOSTAS</span>
+                <span className="text-[10px] text-gray-500 font-mono uppercase tracking-wider block font-bold">RESPOSTAS NA AMOSTRAGEM</span>
                 <div className="flex items-baseline gap-1.5 leading-none">
-                  <span className="text-2xl font-bold font-mono text-white">{responses.length}</span>
-                  <span className="text-[11px] text-gray-400">entrevistados</span>
+                  <span className="text-2xl font-bold font-mono text-white">{filteredResponses.length}</span>
+                  <span className="text-[11px] text-gray-400">fichas</span>
                 </div>
                 <div className="w-full bg-[#181a24] h-1 rounded-full overflow-hidden">
-                  <div className="bg-[#3b82f6] h-full rounded-full" style={{ width: `${Math.min(100, (responses.length/500)*100)}%` }} />
+                  <div className="bg-[#3b82f6] h-full rounded-full" style={{ width: `${Math.min(100, (filteredResponses.length/500)*100)}%` }} />
                 </div>
+                <span className="text-[9px] text-gray-500 font-mono block">Base total: {responses.length}</span>
               </div>
 
               <div className="bg-[#0e0f14] border border-[#1f212a] rounded-2xl p-5 space-y-2">
@@ -3481,7 +3587,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                     <span className="text-[9px] uppercase font-mono font-bold tracking-widest text-[#3b82f6]">Colaboração do Eleitorado</span>
                     <h3 className="text-sm font-bold text-white font-display">Sugestões de Pré-Candidato</h3>
                     <p className="text-xs text-gray-400">
-                      Sugira até 3 nomes de pré-candidato para serem testados na amostragem oficial do próximo ciclo de Petrópolis.
+                      Sugira até 3 nomes de pré-candidato para serem testados no próximo período de amostragem oficial de Petrópolis.
                     </p>
                   </div>
                 </div>
@@ -3533,6 +3639,31 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
               </form>
             </div>
 
+            {/* Banner Informativo de Ponderação Estatística */}
+            <div className="bg-gradient-to-r from-blue-950/45 via-[#0d0e15] to-emerald-950/35 border border-blue-500/20 rounded-2xl p-6 text-left mb-6 shadow-xl">
+              <div className="flex flex-col lg:flex-row gap-5 lg:items-center justify-between">
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <h3 className="text-sm font-black tracking-wider uppercase text-white font-mono flex items-center gap-1.5">
+                      📊 Ponderação Estatística Ativa e Integridade Amostral
+                    </h3>
+                  </div>
+                  <p className="text-xs text-gray-300 leading-relaxed max-w-4xl">
+                    Para garantir a máxima precisão científica e mitigar vieses decorrentes de mobilização coordenada ou disparos em massa por grupos políticos, esta plataforma recalcula continuamente os resultados usando <strong>Ponderação Estatística Proporcional</strong>. Os dados finais são ponderados em tempo real com base no perfil oficial do eleitorado de <strong>Petrópolis-RJ</strong> (proporções de Gênero e Idade estabelecidas pelo TSE e Censo do IBGE).
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 shrink-0 lg:flex-col lg:items-end">
+                  <span className="text-[10px] bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2.5 py-1 rounded-lg font-mono font-semibold">
+                    ♀️ Mulheres: 53.6% | ♂️ Homens: 46.4%
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2.5 py-1 rounded-lg font-mono font-semibold">
+                    🎂 Faixas de Idade: TSE 16 a 60+ anos
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* Tab navigation headers in analyst dashboard */}
             <div className="border-b border-[#1b1c23] pb-4">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:flex bg-[#0f1016] p-1.5 rounded-xl border border-[#21232e] gap-1.5 w-full lg:w-max">
@@ -3541,7 +3672,8 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                   { id: "approvals", label: "📈 Avaliação" },
                   { id: "demographics", label: "👥 Perfil Demográfico" },
                   { id: "evolution", label: "📈 Histórico & Evolução" },
-                  { id: "report", label: "📄 Boletim para WhatsApp" }
+                  { id: "report", label: "📄 Boletim para WhatsApp" },
+                  { id: "petition_6x1", label: "✊ Abaixo-Assinado 6x1" }
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -3659,7 +3791,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                             </span>
                           </div>
                           <p className="text-xs text-gray-400 leading-relaxed">
-                            Contagem instantânea ponderada de todos os <b className="text-white">{responses.length} entrevistados</b> ativos.
+                            Contagem instantânea ponderada de todos os <b className="text-white">{filteredResponses.length} entrevistados</b> ativos neste período.
                           </p>
                         </div>
                       </div>
@@ -3961,7 +4093,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                             </PieChart>
                           </ResponsiveContainer>
                           <div className="absolute inset-0 flex flex-col items-center justify-center leading-none pointer-events-none">
-                            <span className="text-2xl font-bold font-mono text-white">{responses.length}</span>
+                            <span className="text-2xl font-bold font-mono text-white">{filteredResponses.length}</span>
                             <span className="text-[9px] text-gray-500 uppercase tracking-widest font-mono font-bold">Fichas</span>
                           </div>
                         </div>
@@ -3973,7 +4105,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                 <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: item.color }} />
                                 {item.name}
                               </span>
-                              <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                             </div>
                           ))}
                         </div>
@@ -4015,7 +4147,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                 <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: item.color }} />
                                 {item.name}
                               </span>
-                              <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                             </div>
                           ))}
                         </div>
@@ -4057,7 +4189,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                 <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                 {item.name.replace("º Distrito: ", "º d. - ")}
                               </span>
-                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                             </div>
                           ))}
                         </div>
@@ -4099,7 +4231,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                 <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                 {item.name}
                               </span>
-                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                              <span className="font-mono font-bold text-white shrink-0">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                             </div>
                           ))}
                         </div>
@@ -4142,7 +4274,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                   {item.name}
                                 </span>
-                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                               </div>
                             ))}
                           </div>
@@ -4178,7 +4310,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                   {item.name}
                                 </span>
-                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                               </div>
                             ))}
                           </div>
@@ -4214,7 +4346,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                   {item.name}
                                 </span>
-                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                               </div>
                             ))}
                           </div>
@@ -4250,7 +4382,7 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                                   <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }} />
                                   {item.name}
                                 </span>
-                                <span className="font-mono font-bold text-white">{item.value} ({(responses.length > 0 ? (item.value / responses.length) * 100 : 0).toFixed(1)}%)</span>
+                                <span className="font-mono font-bold text-white">{item.value} ({(filteredResponses.length > 0 ? (item.value / filteredResponses.length) * 100 : 0).toFixed(1)}%)</span>
                               </div>
                             ))}
                           </div>
@@ -4311,6 +4443,11 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <EvolutionTab isAdmin={false} responses={responses} />
               )}
 
+              {/* SUBTAB 7: PETITION 6X1 MANAGEMENT */}
+              {analystTab === "petition_6x1" && (
+                <Petition6x1Tab />
+              )}
+
             </div>
 
           </div>
@@ -4319,23 +4456,25 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
       </main>
 
       {/* Footer System Branding */}
-      <footer className="border-t border-[#121319] bg-[#090a0e] mt-24 py-12 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-1.5 text-center md:text-left">
-            <h4 className="text-sm font-bold font-display uppercase text-white tracking-wide">
-              Instituto <span className="text-[#3b82f6]">Linkon</span> - Sondagem Eleitoral
-            </h4>
-            <p className="text-xs text-gray-500 max-w-sm">
-              Sistemas de opinião pública voluntária amadora orientados pela lei de sigilo e LGPD. Em conformidade com a Resolução nº 23.600 do TSE.
-            </p>
-          </div>
+      {activeView !== "petition_6x1" && (
+        <footer className="border-t border-[#121319] bg-[#090a0e] mt-24 py-12 px-6">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="space-y-1.5 text-center md:text-left">
+              <h4 className="text-sm font-bold font-display uppercase text-white tracking-wide">
+                Instituto <span className="text-[#3b82f6]">Linkon</span> - Sondagem Eleitoral
+              </h4>
+              <p className="text-xs text-gray-500 max-w-sm">
+                Sistemas de opinião pública voluntária amadora orientados pela lei de sigilo e LGPD. Em conformidade com a Resolução nº 23.600 do TSE.
+              </p>
+            </div>
 
-          <div className="flex flex-col items-center md:items-end gap-2 text-[10px] font-mono text-gray-500">
-            <span>Sondagem de Opinião Amadora (Sem Registro) • Petrópolis, RJ</span>
-            <span>© 2026 Instituto Linkon — Fins de Estudo / Opinião.</span>
+            <div className="flex flex-col items-center md:items-end gap-2 text-[10px] font-mono text-gray-500">
+              <span>Sondagem de Opinião Amadora (Sem Registro) • Petrópolis, RJ</span>
+              <span>© 2026 Instituto Linkon — Fins de Estudo / Opinião.</span>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
 
 
         </>
@@ -4350,13 +4489,13 @@ ${formattedNeighs || "  (Sem votos registrados neste ciclo)"}
                 <Trash2 className="h-6 w-6" />
               </div>
               <div>
-                <h3 className="text-sm font-bold font-display uppercase tracking-wider text-white">Limpar dados do ciclo?</h3>
+                <h3 className="text-sm font-bold font-display uppercase tracking-wider text-white">Limpar dados da amostragem?</h3>
                 <p className="text-[10px] text-gray-500 font-mono">Esta ação é irreversível</p>
               </div>
             </div>
 
             <p className="text-xs text-gray-400 leading-relaxed text-left font-sans">
-              Você está prestes a apagar <b>todos os depoimentos e coletas acumuladas</b> no ciclo corrente das sondagens do Instituto Linkon. O painel de simulação voltará ao estado original.
+              Você está prestes a apagar <b>todos os depoimentos e coletas acumuladas</b> na amostragem corrente das sondagens do Instituto Linkon. O painel de simulação voltará ao estado original.
             </p>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">

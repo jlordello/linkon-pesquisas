@@ -602,12 +602,136 @@ export function generateBaselineResponses(): SurveyResponse[] {
   return [];
 }
 
-export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData {
+export function calculateResponseWeights(responses: SurveyResponse[]): Record<string, number> {
+  const total = responses.length;
+  const weights: Record<string, number> = {};
+  if (total === 0) return weights;
+
+  // Group responses by cycle key (amostragem) to handle weight calculation per period
+  const groups: Record<string, SurveyResponse[]> = {};
+  responses.forEach(r => {
+    const key = getCycleKeyForTimestamp(r.timestamp) || "current";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+
+  const activeKeys = Object.keys(groups);
+  const numGroups = activeKeys.length;
+
+  // Define targets (TSE 2024 Petrópolis Electorate)
+  const genderTargets: Record<string, number> = {
+    "Feminino": 0.536,
+    "Masculino": 0.464,
+    "Outro": 0.005 // Small fraction to handle gracefully if selected
+  };
+  
+  const ageTargets: Record<string, number> = {
+    "16-24": 0.105,
+    "25-34": 0.175,
+    "35-44": 0.205,
+    "45-59": 0.270,
+    "60+": 0.245
+  };
+
+  activeKeys.forEach(k => {
+    const groupResponses = groups[k];
+    const groupTotal = groupResponses.length;
+    if (groupTotal === 0) return;
+
+    // Count actual occurrences in this group's sample
+    const genderCounts: Record<string, number> = { "Feminino": 0, "Masculino": 0, "Outro": 0 };
+    const ageCounts: Record<string, number> = { "16-24": 0, "25-34": 0, "35-44": 0, "45-59": 0, "60+": 0 };
+
+    groupResponses.forEach(r => {
+      const g = r.gender || "Outro";
+      genderCounts[g] = (genderCounts[g] || 0) + 1;
+
+      const a = r.age || "35-44";
+      ageCounts[a] = (ageCounts[a] || 0) + 1;
+    });
+
+    // Adjust targets if some category is completely unrepresented in the sample (to avoid dividing by zero)
+    let activeGenderTargetSum = 0;
+    Object.keys(genderTargets).forEach(g => {
+      if (genderCounts[g] > 0) {
+        activeGenderTargetSum += genderTargets[g];
+      }
+    });
+    const normalizedGenderTargets: Record<string, number> = {};
+    Object.keys(genderTargets).forEach(g => {
+      if (genderCounts[g] > 0 && activeGenderTargetSum > 0) {
+        normalizedGenderTargets[g] = genderTargets[g] / activeGenderTargetSum;
+      } else {
+        normalizedGenderTargets[g] = 0;
+      }
+    });
+
+    let activeAgeTargetSum = 0;
+    Object.keys(ageTargets).forEach(a => {
+      if (ageCounts[a] > 0) {
+        activeAgeTargetSum += ageTargets[a];
+      }
+    });
+    const normalizedAgeTargets: Record<string, number> = {};
+    Object.keys(ageTargets).forEach(a => {
+      if (ageCounts[a] > 0 && activeAgeTargetSum > 0) {
+        normalizedAgeTargets[a] = ageTargets[a] / activeAgeTargetSum;
+      } else {
+        normalizedAgeTargets[a] = 0;
+      }
+    });
+
+    // Calculate raw weights for this group
+    let rawWeightSum = 0;
+    const rawWeights: Record<string, number> = {};
+
+    groupResponses.forEach(r => {
+      const g = r.gender || "Outro";
+      const a = r.age || "35-44";
+
+      const genderProp = (genderCounts[g] || 0) / groupTotal;
+      const ageProp = (ageCounts[a] || 0) / groupTotal;
+
+      const genderWeight = genderProp > 0 ? (normalizedGenderTargets[g] / genderProp) : 1.0;
+      const ageWeight = ageProp > 0 ? (normalizedAgeTargets[a] / ageProp) : 1.0;
+
+      let w = genderWeight * ageWeight;
+
+      // Weight Trimming: Clamp to prevent extreme weights (Standard statistical practice)
+      if (w < 0.15) w = 0.15;
+      if (w > 6.0) w = 6.0;
+
+      rawWeights[r.id] = w;
+      rawWeightSum += w;
+    });
+
+    // Normalize weights of this group to equal the target proportion (grand total / number of active groups)
+    // This perfectly compensates for unequal sample sizes between different fortnightly periods (amostragens)
+    const targetGroupWeightSum = total / numGroups;
+
+    if (rawWeightSum > 0) {
+      groupResponses.forEach(r => {
+        weights[r.id] = rawWeights[r.id] * (targetGroupWeightSum / rawWeightSum);
+      });
+    } else {
+      groupResponses.forEach(r => {
+        weights[r.id] = targetGroupWeightSum / groupTotal;
+      });
+    }
+  });
+
+  return weights;
+}
+
+export function aggregateSurveyResponses(responses: SurveyResponse[], isCurrentCycle: boolean = true): PollData {
   const total = responses.length;
 
   if (total === 0) {
     return initialPollData;
   }
+
+  // Calculate Weights for all respondents
+  const responseWeights = calculateResponseWeights(responses);
 
   // Calculate evaluations
   const evaluations = [
@@ -615,95 +739,123 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     { id: "eval-couto", entity: "Ricardo Couto", role: "Governador do Estado (RJ)" },
     { id: "eval-hingo", entity: "Hingo Hammes", role: "Prefeito de Petrópolis" }
   ].map(item => {
-    let positive = 0;
-    let regular = 0;
-    let negative = 0;
-    let dontKnow = 0;
+    let positiveWeight = 0;
+    let regularWeight = 0;
+    let negativeWeight = 0;
+    let dontKnowWeight = 0;
+    let totalWeightSum = 0;
 
     responses.forEach(r => {
+      const w = responseWeights[r.id] || 1.0;
+      totalWeightSum += w;
       const val = item.id === "eval-lula" ? r.evalLula : item.id === "eval-couto" ? r.evalGovernor : r.evalMayor;
-      if (val === "positive") positive++;
-      else if (val === "regular") regular++;
-      else if (val === "negative") negative++;
-      else dontKnow++;
+      if (val === "positive") positiveWeight += w;
+      else if (val === "regular") regularWeight += w;
+      else if (val === "negative") negativeWeight += w;
+      else dontKnowWeight += w;
     });
+
+    const divisor = totalWeightSum > 0 ? totalWeightSum : 1;
 
     return {
       id: item.id,
       entity: item.entity,
       role: item.role,
-      positive: parseFloat(((positive / total) * 100).toFixed(1)),
-      regular: parseFloat(((regular / total) * 100).toFixed(1)),
-      negative: parseFloat(((negative / total) * 100).toFixed(1)),
-      dontKnow: parseFloat(((dontKnow / total) * 100).toFixed(1))
+      positive: parseFloat(((positiveWeight / divisor) * 100).toFixed(1)),
+      regular: parseFloat(((regularWeight / divisor) * 100).toFixed(1)),
+      negative: parseFloat(((negativeWeight / divisor) * 100).toFixed(1)),
+      dontKnow: parseFloat(((dontKnowWeight / divisor) * 100).toFixed(1))
     };
   });
 
   // President Scenario
   const basePresCandidates = getActiveCandidates("president");
 
-  let presBrancos = 0;
-  let presIndecisos = 0;
-  const presCounts: Record<string, number> = {};
-  basePresCandidates.forEach(c => { presCounts[c.id] = 0; });
+  let presBrancosWeight = 0;
+  let presIndecisosWeight = 0;
+  const presCountsWeight: Record<string, number> = {};
+  basePresCandidates.forEach(c => { presCountsWeight[c.id] = 0; });
+  let totalPresWeightSum = 0;
 
   responses.forEach(r => {
-    if (r.votePresident === "brancosNulos") presBrancos++;
-    else if (r.votePresident === "indecisos") presIndecisos++;
-    else if (presCounts[r.votePresident] !== undefined) {
-      presCounts[r.votePresident]++;
+    const w = responseWeights[r.id] || 1.0;
+    totalPresWeightSum += w;
+    if (r.votePresident === "brancosNulos") presBrancosWeight += w;
+    else if (r.votePresident === "indecisos") presIndecisosWeight += w;
+    else if (presCountsWeight[r.votePresident] !== undefined) {
+      presCountsWeight[r.votePresident] += w;
     } else {
-      presIndecisos++;
+      presIndecisosWeight += w;
     }
   });
 
+  const presDivisor = totalPresWeightSum > 0 ? totalPresWeightSum : 1;
+
+  const presidentCandidatesMapped = basePresCandidates.map(c => ({
+    ...c,
+    votes: parseFloat(((presCountsWeight[c.id] / presDivisor) * 100).toFixed(1))
+  }));
+  const finalPresidentCandidates = isCurrentCycle 
+    ? presidentCandidatesMapped 
+    : presidentCandidatesMapped.filter(c => (presCountsWeight[c.id] || 0) > 0);
+
   const presidentScenario = {
-    candidates: basePresCandidates.map(c => ({
-      ...c,
-      votes: parseFloat(((presCounts[c.id] / total) * 100).toFixed(1))
-    })),
-    brancosNulos: parseFloat(((presBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((presIndecisos / total) * 100).toFixed(1)),
+    candidates: finalPresidentCandidates,
+    brancosNulos: parseFloat(((presBrancosWeight / presDivisor) * 100).toFixed(1)),
+    indecisos: parseFloat(((presIndecisosWeight / presDivisor) * 100).toFixed(1)),
     spontaneousTop: []
   };
 
   // Governor Scenario
   const baseGovCandidates = getActiveCandidates("governor");
 
-  let govBrancos = 0;
-  let govIndecisos = 0;
-  const govCounts: Record<string, number> = {};
-  baseGovCandidates.forEach(c => { govCounts[c.id] = 0; });
+  let govBrancosWeight = 0;
+  let govIndecisosWeight = 0;
+  const govCountsWeight: Record<string, number> = {};
+  baseGovCandidates.forEach(c => { govCountsWeight[c.id] = 0; });
+  let totalGovWeightSum = 0;
 
   responses.forEach(r => {
-    if (r.voteGovernor === "brancosNulos") govBrancos++;
-    else if (r.voteGovernor === "indecisos") govIndecisos++;
-    else if (govCounts[r.voteGovernor] !== undefined) {
-      govCounts[r.voteGovernor]++;
+    const w = responseWeights[r.id] || 1.0;
+    totalGovWeightSum += w;
+    if (r.voteGovernor === "brancosNulos") govBrancosWeight += w;
+    else if (r.voteGovernor === "indecisos") govIndecisosWeight += w;
+    else if (govCountsWeight[r.voteGovernor] !== undefined) {
+      govCountsWeight[r.voteGovernor] += w;
     } else {
-      govIndecisos++;
+      govIndecisosWeight += w;
     }
   });
 
+  const govDivisor = totalGovWeightSum > 0 ? totalGovWeightSum : 1;
+
+  const governorCandidatesMapped = baseGovCandidates.map(c => ({
+    ...c,
+    votes: parseFloat(((govCountsWeight[c.id] / govDivisor) * 100).toFixed(1))
+  }));
+  const finalGovernorCandidates = isCurrentCycle 
+    ? governorCandidatesMapped 
+    : governorCandidatesMapped.filter(c => (govCountsWeight[c.id] || 0) > 0);
+
   const governorScenario = {
-    candidates: baseGovCandidates.map(c => ({
-      ...c,
-      votes: parseFloat(((govCounts[c.id] / total) * 100).toFixed(1))
-    })),
-    brancosNulos: parseFloat(((govBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((govIndecisos / total) * 100).toFixed(1)),
+    candidates: finalGovernorCandidates,
+    brancosNulos: parseFloat(((govBrancosWeight / govDivisor) * 100).toFixed(1)),
+    indecisos: parseFloat(((govIndecisosWeight / govDivisor) * 100).toFixed(1)),
     spontaneousTop: []
   };
 
   // Senate Scenario
   const baseSenCandidates = getActiveCandidates("senate");
 
-  let senBrancos = 0;
-  let senIndecisos = 0;
-  const senCounts: Record<string, number> = {};
-  baseSenCandidates.forEach(c => { senCounts[c.id] = 0; });
+  let senBrancosWeight = 0;
+  let senIndecisosWeight = 0;
+  const senCountsWeight: Record<string, number> = {};
+  baseSenCandidates.forEach(c => { senCountsWeight[c.id] = 0; });
+  let totalSenWeightSum = 0;
 
   responses.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
+    totalSenWeightSum += w;
     let votes: string[] = [];
     if (Array.isArray(r.voteSenate)) {
       votes = r.voteSenate;
@@ -712,168 +864,213 @@ export function aggregateSurveyResponses(responses: SurveyResponse[]): PollData 
     }
 
     if (votes.includes("brancosNulos") || votes.length === 0) {
-      senBrancos++;
+      senBrancosWeight += w;
     } else if (votes.includes("indecisos")) {
-      senIndecisos++;
+      senIndecisosWeight += w;
     } else {
       votes.forEach(vid => {
-        if (senCounts[vid] !== undefined) {
-          senCounts[vid]++;
+        if (senCountsWeight[vid] !== undefined) {
+          senCountsWeight[vid] += w;
         }
       });
     }
   });
 
+  const senDivisor = totalSenWeightSum > 0 ? totalSenWeightSum : 1;
+
   const senateScenario = {
-    candidates: baseSenCandidates.map(c => ({
-      ...c,
-      votes: parseFloat(((senCounts[c.id] / total) * 100).toFixed(1))
-    })),
-    brancosNulos: parseFloat(((senBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((senIndecisos / total) * 100).toFixed(1))
+    candidates: (() => {
+      const mapped = baseSenCandidates.map(c => ({
+        ...c,
+        votes: parseFloat(((senCountsWeight[c.id] / senDivisor) * 100).toFixed(1))
+      }));
+      return isCurrentCycle ? mapped : mapped.filter(c => (senCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: parseFloat(((senBrancosWeight / senDivisor) * 100).toFixed(1)),
+    indecisos: parseFloat(((senIndecisosWeight / senDivisor) * 100).toFixed(1))
   };
 
   // State Deputy Scenario
   const baseStateCandidates = getActiveCandidates("stateDeputy");
 
-  let stateBrancos = 0;
-  let stateIndecisos = 0;
-  const stateCounts: Record<string, number> = {};
-  baseStateCandidates.forEach(c => { stateCounts[c.id] = 0; });
+  let stateBrancosWeight = 0;
+  let stateIndecisosWeight = 0;
+  const stateCountsWeight: Record<string, number> = {};
+  baseStateCandidates.forEach(c => { stateCountsWeight[c.id] = 0; });
+  let totalStateWeightSum = 0;
 
   responses.forEach(r => {
-    if (r.voteStateDeputy === "brancosNulos") stateBrancos++;
-    else if (r.voteStateDeputy === "indecisos") stateIndecisos++;
-    else if (stateCounts[r.voteStateDeputy] !== undefined) {
-      stateCounts[r.voteStateDeputy]++;
+    const w = responseWeights[r.id] || 1.0;
+    totalStateWeightSum += w;
+    if (r.voteStateDeputy === "brancosNulos") stateBrancosWeight += w;
+    else if (r.voteStateDeputy === "indecisos") stateIndecisosWeight += w;
+    else if (stateCountsWeight[r.voteStateDeputy] !== undefined) {
+      stateCountsWeight[r.voteStateDeputy] += w;
     } else {
-      stateIndecisos++;
+      stateIndecisosWeight += w;
     }
   });
 
+  const stateDivisor = totalStateWeightSum > 0 ? totalStateWeightSum : 1;
+
   const stateDeputyScenario = {
-    candidates: baseStateCandidates.map(c => ({
-      ...c,
-      votes: parseFloat(((stateCounts[c.id] / total) * 100).toFixed(1))
-    })),
-    brancosNulos: parseFloat(((stateBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((stateIndecisos / total) * 100).toFixed(1))
+    candidates: (() => {
+      const mapped = baseStateCandidates.map(c => ({
+        ...c,
+        votes: parseFloat(((stateCountsWeight[c.id] / stateDivisor) * 100).toFixed(1))
+      }));
+      return isCurrentCycle ? mapped : mapped.filter(c => (stateCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: parseFloat(((stateBrancosWeight / stateDivisor) * 100).toFixed(1)),
+    indecisos: parseFloat(((stateIndecisosWeight / stateDivisor) * 100).toFixed(1))
   };
 
   // Federal Deputy Scenario
   const baseFederalCandidates = getActiveCandidates("federalDeputy");
 
-  let fedBrancos = 0;
-  let fedIndecisos = 0;
-  const fedCounts: Record<string, number> = {};
-  baseFederalCandidates.forEach(c => { fedCounts[c.id] = 0; });
+  let fedBrancosWeight = 0;
+  let fedIndecisosWeight = 0;
+  const fedCountsWeight: Record<string, number> = {};
+  baseFederalCandidates.forEach(c => { fedCountsWeight[c.id] = 0; });
+  let totalFedWeightSum = 0;
 
   responses.forEach(r => {
-    if (r.voteFederalDeputy === "brancosNulos") fedBrancos++;
-    else if (r.voteFederalDeputy === "indecisos") fedIndecisos++;
-    else if (fedCounts[r.voteFederalDeputy] !== undefined) {
-      fedCounts[r.voteFederalDeputy]++;
+    const w = responseWeights[r.id] || 1.0;
+    totalFedWeightSum += w;
+    if (r.voteFederalDeputy === "brancosNulos") fedBrancosWeight += w;
+    else if (r.voteFederalDeputy === "indecisos") fedIndecisosWeight += w;
+    else if (fedCountsWeight[r.voteFederalDeputy] !== undefined) {
+      fedCountsWeight[r.voteFederalDeputy] += w;
     } else {
-      fedIndecisos++;
+      fedIndecisosWeight += w;
     }
   });
 
+  const fedDivisor = totalFedWeightSum > 0 ? totalFedWeightSum : 1;
+
   const federalDeputyScenario = {
-    candidates: baseFederalCandidates.map(c => ({
-      ...c,
-      votes: parseFloat(((fedCounts[c.id] / total) * 100).toFixed(1))
-    })),
-    brancosNulos: parseFloat(((fedBrancos / total) * 100).toFixed(1)),
-    indecisos: parseFloat(((fedIndecisos / total) * 100).toFixed(1))
+    candidates: (() => {
+      const mapped = baseFederalCandidates.map(c => ({
+        ...c,
+        votes: parseFloat(((fedCountsWeight[c.id] / fedDivisor) * 100).toFixed(1))
+      }));
+      return isCurrentCycle ? mapped : mapped.filter(c => (fedCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: parseFloat(((fedBrancosWeight / fedDivisor) * 100).toFixed(1)),
+    indecisos: parseFloat(((fedIndecisosWeight / fedDivisor) * 100).toFixed(1))
   };
 
   // Runoff (Segundo Turno) Scenarios
   const basePresRunoffCandidates = getActiveCandidates("presidentRunoff");
-  let presRunoffBrancos = 0;
-  let presRunoffIndecisos = 0;
-  const presRunoffCounts: Record<string, number> = {};
-  basePresRunoffCandidates.forEach(c => { presRunoffCounts[c.id] = 0; });
+  let presRunoffBrancosWeight = 0;
+  let presRunoffIndecisosWeight = 0;
+  const presRunoffCountsWeight: Record<string, number> = {};
+  basePresRunoffCandidates.forEach(c => { presRunoffCountsWeight[c.id] = 0; });
+  let totalPresRunoffWeightSum = 0;
 
   responses.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
+    totalPresRunoffWeightSum += w;
     const val = r.votePresidentRunoff || "";
     if (val === "brancosNulos") {
-      presRunoffBrancos++;
+      presRunoffBrancosWeight += w;
     } else if (val === "indecisos") {
-      presRunoffIndecisos++;
-    } else if (presRunoffCounts[val] !== undefined) {
-      presRunoffCounts[val]++;
+      presRunoffIndecisosWeight += w;
+    } else if (presRunoffCountsWeight[val] !== undefined) {
+      presRunoffCountsWeight[val] += w;
     } else {
-      presRunoffIndecisos++;
+      presRunoffIndecisosWeight += w;
     }
   });
 
+  const presRunoffDivisor = totalPresRunoffWeightSum > 0 ? totalPresRunoffWeightSum : 1;
+
   const presidentRunoff = {
-    candidates: basePresRunoffCandidates.map(c => ({
-      ...c,
-      votes: total > 0 ? parseFloat(((presRunoffCounts[c.id] / total) * 100).toFixed(1)) : 0
-    })).sort((a, b) => b.votes - a.votes),
-    brancosNulos: total > 0 ? parseFloat(((presRunoffBrancos / total) * 100).toFixed(1)) : 0,
-    indecisos: total > 0 ? parseFloat(((presRunoffIndecisos / total) * 100).toFixed(1)) : 0,
+    candidates: (() => {
+      const mapped = basePresRunoffCandidates.map(c => ({
+        ...c,
+        votes: total > 0 ? parseFloat(((presRunoffCountsWeight[c.id] / presRunoffDivisor) * 100).toFixed(1)) : 0
+      })).sort((a, b) => b.votes - a.votes);
+      return isCurrentCycle ? mapped : mapped.filter(c => (presRunoffCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: total > 0 ? parseFloat(((presRunoffBrancosWeight / presRunoffDivisor) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((presRunoffIndecisosWeight / presRunoffDivisor) * 100).toFixed(1)) : 0,
     showRunoff: true
   };
 
   const baseGovRunoffCandidates = getActiveCandidates("governorRunoff");
-  let govRunoffBrancos = 0;
-  let govRunoffIndecisos = 0;
-  const govRunoffCounts: Record<string, number> = {};
-  baseGovRunoffCandidates.forEach(c => { govRunoffCounts[c.id] = 0; });
+  let govRunoffBrancosWeight = 0;
+  let govRunoffIndecisosWeight = 0;
+  const govRunoffCountsWeight: Record<string, number> = {};
+  baseGovRunoffCandidates.forEach(c => { govRunoffCountsWeight[c.id] = 0; });
+  let totalGovRunoffWeightSum = 0;
 
   responses.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
+    totalGovRunoffWeightSum += w;
     const val = r.voteGovernorRunoff || "";
     if (val === "brancosNulos") {
-      govRunoffBrancos++;
+      govRunoffBrancosWeight += w;
     } else if (val === "indecisos") {
-      govRunoffIndecisos++;
-    } else if (govRunoffCounts[val] !== undefined) {
-      govRunoffCounts[val]++;
+      govRunoffIndecisosWeight += w;
+    } else if (govRunoffCountsWeight[val] !== undefined) {
+      govRunoffCountsWeight[val] += w;
     } else {
-      govRunoffIndecisos++;
+      govRunoffIndecisosWeight += w;
     }
   });
 
+  const govRunoffDivisor = totalGovRunoffWeightSum > 0 ? totalGovRunoffWeightSum : 1;
+
   const governorRunoff = {
-    candidates: baseGovRunoffCandidates.map(c => ({
-      ...c,
-      votes: total > 0 ? parseFloat(((govRunoffCounts[c.id] / total) * 100).toFixed(1)) : 0
-    })).sort((a, b) => b.votes - a.votes),
-    brancosNulos: total > 0 ? parseFloat(((govRunoffBrancos / total) * 100).toFixed(1)) : 0,
-    indecisos: total > 0 ? parseFloat(((govRunoffIndecisos / total) * 100).toFixed(1)) : 0,
+    candidates: (() => {
+      const mapped = baseGovRunoffCandidates.map(c => ({
+        ...c,
+        votes: total > 0 ? parseFloat(((govRunoffCountsWeight[c.id] / govRunoffDivisor) * 100).toFixed(1)) : 0
+      })).sort((a, b) => b.votes - a.votes);
+      return isCurrentCycle ? mapped : mapped.filter(c => (govRunoffCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: total > 0 ? parseFloat(((govRunoffBrancosWeight / govRunoffDivisor) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((govRunoffIndecisosWeight / govRunoffDivisor) * 100).toFixed(1)) : 0,
     showRunoff: true
   };
 
   // Mayor of Petrópolis Scenario
   const baseMayorCandidates = getActiveCandidates("mayor");
 
-  let mayBrancos = 0;
-  let mayIndecisos = 0;
-  const mayCounts: Record<string, number> = {};
-  baseMayorCandidates.forEach(c => { mayCounts[c.id] = 0; });
+  let mayBrancosWeight = 0;
+  let mayIndecisosWeight = 0;
+  const mayCountsWeight: Record<string, number> = {};
+  baseMayorCandidates.forEach(c => { mayCountsWeight[c.id] = 0; });
+  let totalMayWeightSum = 0;
 
   responses.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
+    totalMayWeightSum += w;
     const val = r.voteMayorPetropolis || "";
     if (val === "brancosNulos") {
-      mayBrancos++;
+      mayBrancosWeight += w;
     } else if (val === "indecisos") {
-      mayIndecisos++;
-    } else if (mayCounts[val] !== undefined) {
-      mayCounts[val]++;
+      mayIndecisosWeight += w;
+    } else if (mayCountsWeight[val] !== undefined) {
+      mayCountsWeight[val] += w;
     } else {
-      mayIndecisos++;
+      mayIndecisosWeight += w;
     }
   });
 
+  const mayDivisor = totalMayWeightSum > 0 ? totalMayWeightSum : 1;
+
   const mayorScenario = {
-    candidates: baseMayorCandidates.map(c => ({
-      ...c,
-      votes: total > 0 ? parseFloat(((mayCounts[c.id] / total) * 100).toFixed(1)) : 0
-    })).sort((a, b) => b.votes - a.votes),
-    brancosNulos: total > 0 ? parseFloat(((mayBrancos / total) * 100).toFixed(1)) : 0,
-    indecisos: total > 0 ? parseFloat(((mayIndecisos / total) * 100).toFixed(1)) : 0
+    candidates: (() => {
+      const mapped = baseMayorCandidates.map(c => ({
+        ...c,
+        votes: total > 0 ? parseFloat(((mayCountsWeight[c.id] / mayDivisor) * 100).toFixed(1)) : 0
+      })).sort((a, b) => b.votes - a.votes);
+      return isCurrentCycle ? mapped : mapped.filter(c => (mayCountsWeight[c.id] || 0) > 0);
+    })(),
+    brancosNulos: total > 0 ? parseFloat(((mayBrancosWeight / mayDivisor) * 100).toFixed(1)) : 0,
+    indecisos: total > 0 ? parseFloat(((mayIndecisosWeight / mayDivisor) * 100).toFixed(1)) : 0
   };
 
   return {
@@ -930,9 +1127,25 @@ export function getCurrentCycleDates(): CycleDates {
   return { start, end, key };
 }
 
-export function getCycleKeyForTimestamp(timestampStr: string): string {
+export function getCycleKeyForTimestamp(timestampStr: any): string {
+  if (!timestampStr) return "";
   try {
-    const now = new Date(timestampStr);
+    let now: Date;
+    if (timestampStr instanceof Date) {
+      now = timestampStr;
+    } else if (typeof timestampStr === "object" && timestampStr !== null && "seconds" in timestampStr) {
+      now = new Date(timestampStr.seconds * 1000);
+    } else if (typeof timestampStr === "string") {
+      if (timestampStr.includes("/") && timestampStr.split("/")[0].length === 2) {
+        const parts = timestampStr.split(" ")[0].split("/");
+        now = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      } else {
+        now = new Date(timestampStr);
+      }
+    } else {
+      now = new Date(timestampStr);
+    }
+
     if (isNaN(now.getTime())) return "";
     const day = now.getDate();
     const month = now.getMonth() + 1; // 1-indexed
@@ -948,6 +1161,37 @@ export function getCycleKeyForTimestamp(timestampStr: string): string {
     return `${year}-${pad(month)}-${cycleIndex}`;
   } catch (e) {
     return "";
+  }
+}
+
+export function getDatesForCycleKey(key: string): { start: string; end: string } {
+  try {
+    const parts = key.split("-");
+    if (parts.length !== 3) {
+      return { start: "", end: "" };
+    }
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]);
+    const cycleIndex = parseInt(parts[2]);
+
+    const pad = (n: number) => n.toString().padStart(2, "0");
+
+    if (cycleIndex === 1) {
+      return {
+        start: `01/${pad(month)}/${year}`,
+        end: `15/${pad(month)}/${year}`
+      };
+    } else {
+      // Last day of month
+      const lastDayObj = new Date(year, month, 0);
+      const endDay = lastDayObj.getDate();
+      return {
+        start: `16/${pad(month)}/${year}`,
+        end: `${pad(endDay)}/${pad(month)}/${year}`
+      };
+    }
+  } catch (e) {
+    return { start: "", end: "" };
   }
 }
 
@@ -1026,9 +1270,24 @@ export function calculateCandidateProfile(
   });
 
   const totalVotes = candidateVoters.length;
-  const pctOfVoters = totalSample > 0 ? parseFloat(((totalVotes / totalSample) * 100).toFixed(1)) : 0;
+  
+  // Calculate weights
+  const responseWeights = calculateResponseWeights(responses);
+  
+  // Calculate weighted totals
+  let totalVotesWeighted = 0;
+  candidateVoters.forEach(r => {
+    totalVotesWeighted += responseWeights[r.id] || 1.0;
+  });
 
-  if (totalVotes === 0 || totalSample === 0) {
+  let totalSampleWeighted = 0;
+  responses.forEach(r => {
+    totalSampleWeighted += responseWeights[r.id] || 1.0;
+  });
+
+  const pctOfVoters = totalSampleWeighted > 0 ? parseFloat(((totalVotesWeighted / totalSampleWeighted) * 100).toFixed(1)) : 0;
+
+  if (totalVotes === 0 || totalSample === 0 || totalVotesWeighted === 0) {
     return {
       candidateId,
       name: candidateName,
@@ -1052,56 +1311,60 @@ export function calculateCandidateProfile(
     };
   }
 
-  // Calculate Genders
+  // Calculate Genders on weighted basis
   let fem = 0, masc = 0, out = 0;
   candidateVoters.forEach(r => {
-    if (r.gender === "Feminino") fem++;
-    else if (r.gender === "Masculino") masc++;
-    else out++;
+    const w = responseWeights[r.id] || 1.0;
+    if (r.gender === "Feminino") fem += w;
+    else if (r.gender === "Masculino") masc += w;
+    else out += w;
   });
 
-  // Calculate Ages
+  // Calculate Ages on weighted basis
   let age1 = 0, age2 = 0, age3 = 0, age4 = 0, age5 = 0;
   candidateVoters.forEach(r => {
-    if (r.age === "16-24") age1++;
-    else if (r.age === "25-34") age2++;
-    else if (r.age === "35-44") age3++;
-    else if (r.age === "45-59") age4++;
-    else if (r.age === "60+") age5++;
+    const w = responseWeights[r.id] || 1.0;
+    if (r.age === "16-24") age1 += w;
+    else if (r.age === "25-34") age2 += w;
+    else if (r.age === "35-44") age3 += w;
+    else if (r.age === "45-59") age4 += w;
+    else if (r.age === "60+") age5 += w;
   });
 
-  // Calculate Neighborhoods
+  // Calculate Neighborhoods on weighted basis
   const neighCounts: Record<string, number> = {};
   candidateVoters.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
     if (r.neighborhood) {
-      neighCounts[r.neighborhood] = (neighCounts[r.neighborhood] || 0) + 1;
+      neighCounts[r.neighborhood] = (neighCounts[r.neighborhood] || 0) + w;
     }
   });
   const sortedNeighborhoods = Object.entries(neighCounts)
     .map(([neighborhood, count]) => ({
       neighborhood,
-      count,
-      percentage: parseFloat(((count / totalVotes) * 100).toFixed(1))
+      count: Math.round(count * 10) / 10,
+      percentage: parseFloat(((count / totalVotesWeighted) * 100).toFixed(1))
     }))
     .sort((a, b) => b.count - a.count);
 
-  // Calculate Districts
+  // Calculate Districts on weighted basis
   const districtCounts: Record<string, number> = {};
   candidateVoters.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
     if (r.neighborhood) {
       const d = getDistrictForNeighborhood(r.neighborhood);
-      districtCounts[d] = (districtCounts[d] || 0) + 1;
+      districtCounts[d] = (districtCounts[d] || 0) + w;
     }
   });
   const sortedDistricts = Object.entries(districtCounts)
     .map(([district, count]) => ({
       district,
-      count,
-      percentage: parseFloat(((count / totalVotes) * 100).toFixed(1))
+      count: Math.round(count * 10) / 10,
+      percentage: parseFloat(((count / totalVotesWeighted) * 100).toFixed(1))
     }))
     .sort((a, b) => b.count - a.count);
 
-  // Aligned Evaluations
+  // Aligned Evaluations on weighted basis
   let lulaPos = 0, lulaReg = 0, lulaNeg = 0, lulaDk = 0;
   let govPos = 0, govReg = 0, govNeg = 0, govDk = 0;
   let mayorPos = 0, mayorReg = 0, mayorNeg = 0, mayorDk = 0;
@@ -1112,56 +1375,57 @@ export function calculateCandidateProfile(
   const relCounts: Record<string, number> = {};
 
   candidateVoters.forEach(r => {
+    const w = responseWeights[r.id] || 1.0;
     // Lula
-    if (r.evalLula === "positive") lulaPos++;
-    else if (r.evalLula === "regular") lulaReg++;
-    else if (r.evalLula === "negative") lulaNeg++;
-    else lulaDk++;
+    if (r.evalLula === "positive") lulaPos += w;
+    else if (r.evalLula === "regular") lulaReg += w;
+    else if (r.evalLula === "negative") lulaNeg += w;
+    else lulaDk += w;
 
     // Governor
-    if (r.evalGovernor === "positive") govPos++;
-    else if (r.evalGovernor === "regular") govReg++;
-    else if (r.evalGovernor === "negative") govNeg++;
-    else govDk++;
+    if (r.evalGovernor === "positive") govPos += w;
+    else if (r.evalGovernor === "regular") govReg += w;
+    else if (r.evalGovernor === "negative") govNeg += w;
+    else govDk += w;
 
     // Mayor
-    if (r.evalMayor === "positive") mayorPos++;
-    else if (r.evalMayor === "regular") mayorReg++;
-    else if (r.evalMayor === "negative") mayorNeg++;
-    else mayorDk++;
+    if (r.evalMayor === "positive") mayorPos += w;
+    else if (r.evalMayor === "regular") mayorReg += w;
+    else if (r.evalMayor === "negative") mayorNeg += w;
+    else mayorDk += w;
 
     // Demographics
     const edu = r.education || "Não Informado";
-    eduCounts[edu] = (eduCounts[edu] || 0) + 1;
+    eduCounts[edu] = (eduCounts[edu] || 0) + w;
 
     const inc = r.income || "Não Informado";
-    incCounts[inc] = (incCounts[inc] || 0) + 1;
+    incCounts[inc] = (incCounts[inc] || 0) + w;
 
     const col = r.color || "Não Informado";
-    colCounts[col] = (colCounts[col] || 0) + 1;
+    colCounts[col] = (colCounts[col] || 0) + w;
 
     const rel = r.religion || "Não Informado";
-    relCounts[rel] = (relCounts[rel] || 0) + 1;
+    relCounts[rel] = (relCounts[rel] || 0) + w;
   });
 
   const education: Record<string, number> = {};
   Object.entries(eduCounts).forEach(([k, v]) => {
-    education[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+    education[k] = parseFloat(((v / totalVotesWeighted) * 100).toFixed(1));
   });
 
   const income: Record<string, number> = {};
   Object.entries(incCounts).forEach(([k, v]) => {
-    income[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+    income[k] = parseFloat(((v / totalVotesWeighted) * 100).toFixed(1));
   });
 
   const color: Record<string, number> = {};
   Object.entries(colCounts).forEach(([k, v]) => {
-    color[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+    color[k] = parseFloat(((v / totalVotesWeighted) * 100).toFixed(1));
   });
 
   const religion: Record<string, number> = {};
   Object.entries(relCounts).forEach(([k, v]) => {
-    religion[k] = parseFloat(((v / totalVotes) * 100).toFixed(1));
+    religion[k] = parseFloat(((v / totalVotesWeighted) * 100).toFixed(1));
   });
 
   return {
@@ -1172,16 +1436,16 @@ export function calculateCandidateProfile(
     totalSample,
     pctOfVoters,
     gender: {
-      feminino: parseFloat(((fem / totalVotes) * 100).toFixed(1)),
-      masculino: parseFloat(((masc / totalVotes) * 100).toFixed(1)),
-      outro: parseFloat(((out / totalVotes) * 100).toFixed(1))
+      feminino: parseFloat(((fem / totalVotesWeighted) * 100).toFixed(1)),
+      masculino: parseFloat(((masc / totalVotesWeighted) * 100).toFixed(1)),
+      outro: parseFloat(((out / totalVotesWeighted) * 100).toFixed(1))
     },
     age: {
-      "16-24": parseFloat(((age1 / totalVotes) * 100).toFixed(1)),
-      "25-34": parseFloat(((age2 / totalVotes) * 100).toFixed(1)),
-      "35-44": parseFloat(((age3 / totalVotes) * 100).toFixed(1)),
-      "45-59": parseFloat(((age4 / totalVotes) * 100).toFixed(1)),
-      "60+": parseFloat(((age5 / totalVotes) * 100).toFixed(1))
+      "16-24": parseFloat(((age1 / totalVotesWeighted) * 100).toFixed(1)),
+      "25-34": parseFloat(((age2 / totalVotesWeighted) * 100).toFixed(1)),
+      "35-44": parseFloat(((age3 / totalVotesWeighted) * 100).toFixed(1)),
+      "45-59": parseFloat(((age4 / totalVotesWeighted) * 100).toFixed(1)),
+      "60+": parseFloat(((age5 / totalVotesWeighted) * 100).toFixed(1))
     },
     neighborhoods: sortedNeighborhoods,
     districts: sortedDistricts,
@@ -1191,22 +1455,22 @@ export function calculateCandidateProfile(
     religion,
     evaluations: {
       lula: {
-        positive: parseFloat(((lulaPos / totalVotes) * 100).toFixed(1)),
-        regular: parseFloat(((lulaReg / totalVotes) * 100).toFixed(1)),
-        negative: parseFloat(((lulaNeg / totalVotes) * 100).toFixed(1)),
-        dontKnow: parseFloat(((lulaDk / totalVotes) * 100).toFixed(1))
+        positive: parseFloat(((lulaPos / totalVotesWeighted) * 100).toFixed(1)),
+        regular: parseFloat(((lulaReg / totalVotesWeighted) * 100).toFixed(1)),
+        negative: parseFloat(((lulaNeg / totalVotesWeighted) * 100).toFixed(1)),
+        dontKnow: parseFloat(((lulaDk / totalVotesWeighted) * 100).toFixed(1))
       },
       governor: {
-        positive: parseFloat(((govPos / totalVotes) * 100).toFixed(1)),
-        regular: parseFloat(((govReg / totalVotes) * 100).toFixed(1)),
-        negative: parseFloat(((govNeg / totalVotes) * 100).toFixed(1)),
-        dontKnow: parseFloat(((govDk / totalVotes) * 100).toFixed(1))
+        positive: parseFloat(((govPos / totalVotesWeighted) * 100).toFixed(1)),
+        regular: parseFloat(((govReg / totalVotesWeighted) * 100).toFixed(1)),
+        negative: parseFloat(((govNeg / totalVotesWeighted) * 100).toFixed(1)),
+        dontKnow: parseFloat(((govDk / totalVotesWeighted) * 100).toFixed(1))
       },
       mayor: {
-        positive: parseFloat(((mayorPos / totalVotes) * 100).toFixed(1)),
-        regular: parseFloat(((mayorReg / totalVotes) * 100).toFixed(1)),
-        negative: parseFloat(((mayorNeg / totalVotes) * 100).toFixed(1)),
-        dontKnow: parseFloat(((mayorDk / totalVotes) * 100).toFixed(1))
+        positive: parseFloat(((mayorPos / totalVotesWeighted) * 100).toFixed(1)),
+        regular: parseFloat(((mayorReg / totalVotesWeighted) * 100).toFixed(1)),
+        negative: parseFloat(((mayorNeg / totalVotesWeighted) * 100).toFixed(1)),
+        dontKnow: parseFloat(((mayorDk / totalVotesWeighted) * 100).toFixed(1))
       }
     }
   };

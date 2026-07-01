@@ -166,6 +166,30 @@
         "category",
         "candidates"
       ]
+    },
+    "PetitionSignature": {
+      "title": "PetitionSignature",
+      "description": "A signed petition entry for ending the 6x1 work shift from PT Petrópolis",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "synced": { "type": "boolean" }
+      },
+      "required": ["id", "name", "email", "whatsapp", "timestamp"]
+    },
+    "PetitionSettings": {
+      "title": "PetitionSettings",
+      "description": "Settings for linking the Google Sheet",
+      "type": "object",
+      "properties": {
+        "spreadsheetId": { "type": "string" },
+        "spreadsheetUrl": { "type": "string" },
+        "lastSynced": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -180,6 +204,14 @@
     "candidates_config": {
       "schema": "#/entities/CandidatesConfig",
       "description": "Configuration containing the user configured list of candidates per election category"
+    },
+    "signatures_6x1": {
+      "schema": "#/entities/PetitionSignature",
+      "description": "Collection of signatures for the 6x1 work shift petition"
+    },
+    "petition_settings": {
+      "schema": "#/entities/PetitionSettings",
+      "description": "Google Sheets settings for the 6x1 petition"
     }
   }
 }

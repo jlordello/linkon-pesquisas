@@ -62,7 +62,7 @@ app.post("/api/gemini/suggest-candidates", async (req, res) => {
             name,
             party,
             count,
-            analysis: `Indicação orgânica de Petrópolis. Recenseado com ${count} menções neste ciclo de coletas.`
+            analysis: `Indicação orgânica de Petrópolis. Recenseado com ${count} menções nesta amostragem de coletas.`
           };
         });
 
